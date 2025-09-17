@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from config import Config
 
 class GroqClient:
@@ -49,6 +49,84 @@ class GroqClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["choices"][0]["message"]["content"].strip()
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"Groq API error {response.status}: {error_text}")
+                        
+        except asyncio.TimeoutError:
+            raise Exception("Groq API request timed out")
+        except Exception as e:
+            raise Exception(f"Error calling Groq API: {str(e)}")
+    
+    async def generate_response_with_history(
+        self, 
+        user_message: str, 
+        system_prompt: str, 
+        conversation_history: List[Dict],
+        model_type: str = "fast",
+        temperature: float = None,
+        max_tokens: int = None
+    ) -> str:
+        """
+        Generate a response using Groq GPT OSS with conversation history
+        
+        Args:
+            user_message: The user's current input message
+            system_prompt: The system prompt for the character
+            conversation_history: List of previous conversation messages
+            model_type: Either "fast" (20B) or "quality" (120B)
+            temperature: Response creativity (0.0-1.0)
+            max_tokens: Maximum tokens in response
+            
+        Returns:
+            Generated response text
+        """
+        if model_type not in self.models:
+            raise ValueError(f"Invalid model type: {model_type}. Must be 'fast' or 'quality'")
+        
+        model = self.models[model_type]
+        temperature = temperature or Config.DEFAULT_TEMPERATURE
+        max_tokens = max_tokens or Config.MAX_RESPONSE_LENGTH
+        
+        # Build messages array with system prompt and conversation history
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add conversation history (limit to last 10 messages to avoid token limits)
+        recent_history = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
+        for msg in recent_history:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+        
+        # Add current user message
+        messages.append({"role": "user", "content": user_message})
+        
+        payload = {
+            "model": model,
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False

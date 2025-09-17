@@ -9,6 +9,7 @@ from config import Config
 from characters import CharacterManager, CharacterPersona, ScenarioType
 from scenarios import ScenarioManager, Scenario
 from groq_client import GroqClient
+from gemini_client import GeminiClient
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -32,12 +33,135 @@ class FlirBot(commands.Bot):
         self.character_manager = CharacterManager()
         self.scenario_manager = ScenarioManager()
         self.groq_client = GroqClient()
+        self.gemini_client = GeminiClient()
         
-        # Active sessions: {user_id: {"scenario": Scenario, "characters": [CharacterPersona], "context": str}}
+        # Active sessions: {user_id: {"scenario": Scenario, "characters": [CharacterPersona], "context": str, "conversation_history": List[Dict], "turn_count": int}}
         self.active_sessions: Dict[int, Dict] = {}
         
         # Load commands
         self.load_commands()
+    
+    async def _end_conversation_with_feedback(self, ctx, user_id: int, session: Dict):
+        """End conversation and generate feedback"""
+        try:
+            # Send conversation end message
+            embed = discord.Embed(
+                title="🏁 Conversation Complete!",
+                description=f"Great job completing the **{session['scenario'].name}** scenario! Generating your personalized feedback...",
+                color=0xff6600
+            )
+            await ctx.send(embed=embed)
+            
+            # Generate feedback
+            await ctx.send("🤖 Analyzing your conversation and generating feedback...")
+            
+            current_character = session.get("current_character")
+            character_name = current_character.name if current_character else "Unknown"
+            
+            feedback = await self.gemini_client.generate_feedback(
+                conversation_history=session["conversation_history"],
+                scenario_name=session["scenario"].name,
+                character_name=character_name,
+                scenario_objectives=session["scenario"].objectives
+            )
+            
+            # Send feedback
+            feedback_embed = discord.Embed(
+                title="📊 Your Performance Feedback",
+                description=f"**Scenario:** {session['scenario'].name}\n**Character:** {character_name}\n**Turns:** {session['turn_count']}",
+                color=0x00ff00
+            )
+            
+            # Split feedback into chunks if too long
+            if len(feedback) > 2000:
+                # Split by sections
+                sections = feedback.split('\n\n')
+                for section in sections[:3]:  # Show first 3 sections
+                    if section.strip():
+                        feedback_embed.add_field(
+                            name="📝 Feedback",
+                            value=section[:1000] + "..." if len(section) > 1000 else section,
+                            inline=False
+                        )
+            else:
+                feedback_embed.add_field(
+                    name="📝 Feedback",
+                    value=feedback,
+                    inline=False
+                )
+            
+            feedback_embed.set_footer(text="Use !start <scenario_id> to try another scenario!")
+            await ctx.send(embed=feedback_embed)
+            
+            # Clean up session
+            del self.active_sessions[user_id]
+            
+        except Exception as e:
+            logger.error(f"Error generating feedback: {e}")
+            await ctx.send("❌ Error generating feedback. Session ended.")
+            if user_id in self.active_sessions:
+                del self.active_sessions[user_id]
+    
+    async def _end_conversation_with_feedback_dm(self, message, user_id: int, session: Dict):
+        """End conversation and generate feedback for DM"""
+        try:
+            # Send conversation end message
+            embed = discord.Embed(
+                title="🏁 Conversation Complete!",
+                description=f"Great job completing the **{session['scenario'].name}** scenario! Generating your personalized feedback...",
+                color=0xff6600
+            )
+            await message.channel.send(embed=embed)
+            
+            # Generate feedback
+            await message.channel.send("🤖 Analyzing your conversation and generating feedback...")
+            
+            current_character = session.get("current_character")
+            character_name = current_character.name if current_character else "Unknown"
+            
+            feedback = await self.gemini_client.generate_feedback(
+                conversation_history=session["conversation_history"],
+                scenario_name=session["scenario"].name,
+                character_name=character_name,
+                scenario_objectives=session["scenario"].objectives
+            )
+            
+            # Send feedback
+            feedback_embed = discord.Embed(
+                title="📊 Your Performance Feedback",
+                description=f"**Scenario:** {session['scenario'].name}\n**Character:** {character_name}\n**Turns:** {session['turn_count']}",
+                color=0x00ff00
+            )
+            
+            # Split feedback into chunks if too long
+            if len(feedback) > 2000:
+                # Split by sections
+                sections = feedback.split('\n\n')
+                for section in sections[:3]:  # Show first 3 sections
+                    if section.strip():
+                        feedback_embed.add_field(
+                            name="📝 Feedback",
+                            value=section[:1000] + "..." if len(section) > 1000 else section,
+                            inline=False
+                        )
+            else:
+                feedback_embed.add_field(
+                    name="📝 Feedback",
+                    value=feedback,
+                    inline=False
+                )
+            
+            feedback_embed.set_footer(text="Use !start <scenario_id> to try another scenario!")
+            await message.channel.send(embed=feedback_embed)
+            
+            # Clean up session
+            del self.active_sessions[user_id]
+            
+        except Exception as e:
+            logger.error(f"Error generating feedback: {e}")
+            await message.channel.send("❌ Error generating feedback. Session ended.")
+            if user_id in self.active_sessions:
+                del self.active_sessions[user_id]
     
     def load_commands(self):
         """Load all bot commands"""
@@ -73,7 +197,8 @@ class FlirBot(commands.Bot):
                 name="🎮 Session Commands",
                 value="""`!start <scenario_id>` - Start a scenario
 `!end` - End current session
-`!status` - Check current session status""",
+`!status` - Check current session status
+`!history` - View conversation history""",
                 inline=False
             )
             
@@ -105,11 +230,26 @@ class FlirBot(commands.Bot):
             except Exception as e:
                 groq_status = f"❌ Error: {str(e)}"
             
+            # Test Gemini connection
+            try:
+                gemini_working = await self.gemini_client.test_connection()
+                gemini_status = "✅ Working" if gemini_working else "❌ Failed"
+            except Exception as e:
+                gemini_status = f"❌ Error: {str(e)}"
+            
+            all_working = groq_working and gemini_working
+            
             embed = discord.Embed(
                 title="🔧 Connection Test Results",
-                color=0x00ff00 if groq_working else 0xff0000
+                color=0x00ff00 if all_working else 0xff0000
             )
             embed.add_field(name="Groq API", value=groq_status, inline=False)
+            embed.add_field(name="Gemini API", value=gemini_status, inline=False)
+            
+            if all_working:
+                embed.add_field(name="Status", value="🎉 All systems ready for social skills training!", inline=False)
+            else:
+                embed.add_field(name="Status", value="⚠️ Some services unavailable. Check your API keys.", inline=False)
             
             await ctx.send(embed=embed)
         
@@ -278,7 +418,9 @@ class FlirBot(commands.Bot):
                 "scenario": scenario,
                 "characters": characters,
                 "context": scenario.context,
-                "current_character": None
+                "current_character": None,
+                "conversation_history": [],
+                "turn_count": 0
             }
             
             # Send scenario introduction
@@ -348,12 +490,30 @@ class FlirBot(commands.Bot):
             try:
                 await ctx.send(f"🤔 {character.name} is thinking...")
                 
-                # Generate response
-                response = await self.groq_client.generate_response(
+                # Add user message to conversation history
+                session["conversation_history"].append({
+                    "role": "user",
+                    "content": message,
+                    "character": character.name
+                })
+                
+                # Increment turn count
+                session["turn_count"] += 1
+                
+                # Generate response with conversation history
+                response = await self.groq_client.generate_response_with_history(
                     user_message=message,
                     system_prompt=character.generate_system_prompt(),
-                    model_type="fast"  # Use fast model for now
+                    conversation_history=session["conversation_history"],
+                    model_type="fast"
                 )
+                
+                # Add character response to conversation history
+                session["conversation_history"].append({
+                    "role": "assistant",
+                    "content": response,
+                    "character": character.name
+                })
                 
                 # Send response
                 embed = discord.Embed(
@@ -362,7 +522,15 @@ class FlirBot(commands.Bot):
                     color=0x0099ff
                 )
                 
+                # Add turn counter to embed
+                turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                
                 await ctx.send(embed=embed)
+                
+                # Check if conversation should end
+                if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
+                    await self._end_conversation_with_feedback(ctx, user_id, session)
                 
             except Exception as e:
                 logger.error(f"Error generating response: {e}")
@@ -421,10 +589,61 @@ class FlirBot(commands.Bot):
             )
             
             embed.add_field(
+                name="🔄 Turn Count",
+                value=f"{session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}",
+                inline=True
+            )
+            
+            embed.add_field(
                 name="👥 Available Characters",
                 value=", ".join([char.name for char in session["characters"]]),
                 inline=False
             )
+            
+            await ctx.send(embed=embed)
+        
+        @self.command(name="history", aliases=["chat"])
+        async def conversation_history(ctx):
+            """View conversation history for current session"""
+            user_id = ctx.author.id
+            
+            if user_id not in self.active_sessions:
+                await ctx.send("❌ You don't have an active session.")
+                return
+            
+            session = self.active_sessions[user_id]
+            history = session.get("conversation_history", [])
+            
+            if not history:
+                await ctx.send("📝 No conversation history yet. Start talking to a character!")
+                return
+            
+            embed = discord.Embed(
+                title="📝 Conversation History",
+                description=f"**Scenario:** {session['scenario'].name}",
+                color=0x0099ff
+            )
+            
+            # Show last 10 messages to avoid embed limits
+            recent_history = history[-10:] if len(history) > 10 else history
+            
+            for i, msg in enumerate(recent_history, 1):
+                role_emoji = "👤" if msg["role"] == "user" else "🤖"
+                character_name = msg.get("character", "Unknown")
+                
+                # Truncate long messages
+                content = msg["content"]
+                if len(content) > 200:
+                    content = content[:200] + "..."
+                
+                embed.add_field(
+                    name=f"{role_emoji} {character_name if msg['role'] == 'assistant' else 'You'}",
+                    value=content,
+                    inline=False
+                )
+            
+            if len(history) > 10:
+                embed.set_footer(text=f"Showing last 10 of {len(history)} messages")
             
             await ctx.send(embed=embed)
         
@@ -451,11 +670,30 @@ class FlirBot(commands.Bot):
                     try:
                         await message.channel.send(f"🤔 {current_char.name} is thinking...")
                         
-                        response = await self.groq_client.generate_response(
+                        # Add user message to conversation history
+                        session["conversation_history"].append({
+                            "role": "user",
+                            "content": message.content,
+                            "character": current_char.name
+                        })
+                        
+                        # Increment turn count
+                        session["turn_count"] += 1
+                        
+                        # Generate response with conversation history
+                        response = await self.groq_client.generate_response_with_history(
                             user_message=message.content,
                             system_prompt=current_char.generate_system_prompt(),
+                            conversation_history=session["conversation_history"],
                             model_type="fast"
                         )
+                        
+                        # Add character response to conversation history
+                        session["conversation_history"].append({
+                            "role": "assistant",
+                            "content": response,
+                            "character": current_char.name
+                        })
                         
                         embed = discord.Embed(
                             title=f"💬 {current_char.name}",
@@ -463,7 +701,15 @@ class FlirBot(commands.Bot):
                             color=0x0099ff
                         )
                         
+                        # Add turn counter to embed
+                        turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                        embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                        
                         await message.channel.send(embed=embed)
+                        
+                        # Check if conversation should end
+                        if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
+                            await self._end_conversation_with_feedback_dm(message, user_id, session)
                         
                     except Exception as e:
                         logger.error(f"Error in character response: {e}")
