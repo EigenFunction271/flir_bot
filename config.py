@@ -36,10 +36,18 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate that all required environment variables are set"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         required_vars = ["DISCORD_BOT_TOKEN", "GROQ_API_KEY", "GEMINI_API_KEY"]
         missing_vars = [var for var in required_vars if not getattr(cls, var)]
         
         if missing_vars:
+            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+            logger.error("Please check your Render environment variables:")
+            for var in missing_vars:
+                logger.error(f"  - {var}")
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
         
+        logger.info("✅ All required environment variables are set")
         return True

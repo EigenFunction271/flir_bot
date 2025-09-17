@@ -4,6 +4,9 @@ import asyncio
 import logging
 from typing import Optional, Dict, List
 import json
+import os
+from aiohttp import web
+import threading
 
 from config import Config
 from characters import CharacterManager, CharacterPersona, ScenarioType
@@ -715,11 +718,32 @@ class FlirBot(commands.Bot):
                         logger.error(f"Error in character response: {e}")
                         await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
 
+async def health_check(request):
+    """Health check endpoint for Render"""
+    return web.Response(text="Flir Bot is running!", status=200)
+
+async def start_web_server():
+    """Start a simple web server for health checks"""
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.getenv('PORT', 8000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Health check server started on port {port}")
+
 async def main():
     """Main function to run the bot"""
     try:
         # Validate configuration
         Config.validate()
+        
+        # Start health check server
+        await start_web_server()
         
         # Create and run bot
         bot = FlirBot()
