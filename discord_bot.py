@@ -948,7 +948,7 @@ async def health_check(request):
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
             "bot_ready": True,
-            "active_sessions": len(getattr(request.app, 'bot', None).active_sessions if hasattr(request.app, 'bot') else 0)
+            "message": "Flir Bot is running!"
         }
         
         return web.json_response(status, status=200)
