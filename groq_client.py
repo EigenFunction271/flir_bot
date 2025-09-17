@@ -1,8 +1,11 @@
 import asyncio
 import aiohttp
 import json
+import logging
 from typing import Optional, Dict, Any, List
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 class GroqClient:
     """Client for interacting with Groq GPT OSS API"""
@@ -11,9 +14,12 @@ class GroqClient:
         self.api_key = Config.GROQ_API_KEY
         self.base_url = Config.GROQ_BASE_URL
         self.models = Config.GROQ_MODELS
+        self.session = None
         
         if not self.api_key:
             raise ValueError("GROQ_API_KEY not found in environment variables")
+        
+        logger.info("✅ GroqClient initialized successfully")
     
     async def generate_response(
         self, 
@@ -60,24 +66,30 @@ class GroqClient:
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
+            # Use session reuse for better performance
+            if not self.session or self.session.closed:
+                self.session = aiohttp.ClientSession()
+            
+            async with self.session.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"].strip()
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Groq API error {response.status}: {error_text}")
+                    raise Exception(f"Groq API error {response.status}: {error_text}")
                     
-                    if response.status == 200:
-                        data = await response.json()
-                        return data["choices"][0]["message"]["content"].strip()
-                    else:
-                        error_text = await response.text()
-                        raise Exception(f"Groq API error {response.status}: {error_text}")
-                        
         except asyncio.TimeoutError:
+            logger.error("Groq API request timed out")
             raise Exception("Groq API request timed out")
         except Exception as e:
+            logger.error(f"Error calling Groq API: {str(e)}")
             raise Exception(f"Error calling Groq API: {str(e)}")
     
     async def generate_response_with_history(
@@ -138,24 +150,30 @@ class GroqClient:
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
+            # Use session reuse for better performance
+            if not self.session or self.session.closed:
+                self.session = aiohttp.ClientSession()
+            
+            async with self.session.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"].strip()
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Groq API error {response.status}: {error_text}")
+                    raise Exception(f"Groq API error {response.status}: {error_text}")
                     
-                    if response.status == 200:
-                        data = await response.json()
-                        return data["choices"][0]["message"]["content"].strip()
-                    else:
-                        error_text = await response.text()
-                        raise Exception(f"Groq API error {response.status}: {error_text}")
-                        
         except asyncio.TimeoutError:
+            logger.error("Groq API request timed out")
             raise Exception("Groq API request timed out")
         except Exception as e:
+            logger.error(f"Error calling Groq API: {str(e)}")
             raise Exception(f"Error calling Groq API: {str(e)}")
     
     async def test_connection(self) -> bool:
@@ -168,5 +186,11 @@ class GroqClient:
             )
             return "Connection successful!" in response
         except Exception as e:
-            print(f"Groq connection test failed: {e}")
+            logger.error(f"Groq connection test failed: {e}")
             return False
+    
+    async def close(self):
+        """Close the HTTP session"""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.info("✅ GroqClient session closed")

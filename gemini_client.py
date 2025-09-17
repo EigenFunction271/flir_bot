@@ -1,7 +1,10 @@
 import asyncio
 import google.generativeai as genai
+import logging
 from typing import List, Dict, Optional
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 class GeminiClient:
     """Client for Google Gemini Flash 2.0 feedback generation"""
@@ -15,6 +18,7 @@ class GeminiClient:
         # Configure Gemini
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        logger.info("✅ GeminiClient initialized successfully")
     
     async def generate_feedback(
         self, 
@@ -74,6 +78,7 @@ Keep the feedback constructive, specific, and encouraging. Aim for 200-300 words
             return response.text.strip()
             
         except Exception as e:
+            logger.error(f"Error generating feedback with Gemini: {str(e)}")
             raise Exception(f"Error generating feedback with Gemini: {str(e)}")
     
     def _format_conversation_history(self, conversation_history: List[Dict]) -> str:
@@ -101,5 +106,5 @@ Keep the feedback constructive, specific, and encouraging. Aim for 200-300 words
             )
             return "Connection successful!" in response.text
         except Exception as e:
-            print(f"Gemini connection test failed: {e}")
+            logger.error(f"Gemini connection test failed: {e}")
             return False

@@ -2,11 +2,15 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import json
 import os
 from aiohttp import web
 import threading
+import traceback
+from datetime import datetime, timedelta
+import pickle
+from pathlib import Path
 
 from config import Config
 from characters import CharacterManager, CharacterPersona, ScenarioType
@@ -15,7 +19,14 @@ from groq_client import GroqClient
 from gemini_client import GeminiClient
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('flir_bot.log')
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class FlirBot(commands.Bot):
@@ -32,20 +43,80 @@ class FlirBot(commands.Bot):
             help_command=None
         )
         
-        # Initialize components
-        self.character_manager = CharacterManager()
-        self.scenario_manager = ScenarioManager()
-        self.groq_client = GroqClient()
-        self.gemini_client = GeminiClient()
+        # Initialize components with error handling
+        try:
+            self.character_manager = CharacterManager()
+            self.scenario_manager = ScenarioManager()
+            self.groq_client = GroqClient()
+            self.gemini_client = GeminiClient()
+            logger.info("✅ All components initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize components: {e}")
+            raise
         
-        # Active sessions: {user_id: {"scenario": Scenario, "characters": [CharacterPersona], "context": str, "conversation_history": List[Dict], "turn_count": int}}
+        # Active sessions with persistence
         self.active_sessions: Dict[int, Dict] = {}
+        self.session_file = Path("active_sessions.pkl")
+        self.load_sessions()
+        
+        # Error tracking
+        self.error_count = 0
+        self.last_error_time = None
+        self.max_errors_per_hour = 10
         
         # Load commands
         self.load_commands()
     
+    def load_sessions(self):
+        """Load active sessions from disk"""
+        try:
+            if self.session_file.exists():
+                with open(self.session_file, 'rb') as f:
+                    self.active_sessions = pickle.load(f)
+                logger.info(f"✅ Loaded {len(self.active_sessions)} active sessions")
+            else:
+                logger.info("No existing sessions found")
+        except Exception as e:
+            logger.error(f"❌ Failed to load sessions: {e}")
+            self.active_sessions = {}
+    
+    def save_sessions(self):
+        """Save active sessions to disk"""
+        try:
+            with open(self.session_file, 'wb') as f:
+                pickle.dump(self.active_sessions, f)
+            logger.debug(f"💾 Saved {len(self.active_sessions)} active sessions")
+        except Exception as e:
+            logger.error(f"❌ Failed to save sessions: {e}")
+    
+    def check_error_rate(self) -> bool:
+        """Check if error rate is too high"""
+        now = datetime.now()
+        if self.last_error_time and (now - self.last_error_time) < timedelta(hours=1):
+            if self.error_count >= self.max_errors_per_hour:
+                logger.critical(f"🚨 Error rate too high: {self.error_count} errors in the last hour")
+                return False
+        else:
+            # Reset counter if more than an hour has passed
+            self.error_count = 0
+            self.last_error_time = now
+        return True
+    
+    def handle_error(self, error: Exception, context: str = ""):
+        """Centralized error handling"""
+        self.error_count += 1
+        self.last_error_time = datetime.now()
+        
+        logger.error(f"❌ Error in {context}: {str(error)}")
+        logger.error(f"📊 Error count: {self.error_count}")
+        
+        if not self.check_error_rate():
+            logger.critical("🚨 Bot entering safe mode due to high error rate")
+            return False
+        return True
+    
     async def _end_conversation_with_feedback(self, ctx, user_id: int, session: Dict):
-        """End conversation and generate feedback"""
+        """End conversation and generate feedback with error boundaries"""
         try:
             # Send conversation end message
             embed = discord.Embed(
@@ -55,17 +126,17 @@ class FlirBot(commands.Bot):
             )
             await ctx.send(embed=embed)
             
-            # Generate feedback
+            # Generate feedback with fallback
             await ctx.send("🤖 Analyzing your conversation and generating feedback...")
             
             current_character = session.get("current_character")
             character_name = current_character.name if current_character else "Unknown"
             
-            feedback = await self.gemini_client.generate_feedback(
-                conversation_history=session["conversation_history"],
-                scenario_name=session["scenario"].name,
-                character_name=character_name,
-                scenario_objectives=session["scenario"].objectives
+            feedback = await self._generate_feedback_with_fallback(
+                session["conversation_history"],
+                session["scenario"].name,
+                character_name,
+                session["scenario"].objectives
             )
             
             # Send feedback
@@ -98,15 +169,104 @@ class FlirBot(commands.Bot):
             
             # Clean up session
             del self.active_sessions[user_id]
+            self.save_sessions()
             
         except Exception as e:
+            if not self.handle_error(e, "feedback generation"):
+                await ctx.send("🚨 Bot is experiencing issues. Please try again later.")
+                return
+            
             logger.error(f"Error generating feedback: {e}")
             await ctx.send("❌ Error generating feedback. Session ended.")
             if user_id in self.active_sessions:
                 del self.active_sessions[user_id]
+                self.save_sessions()
+    
+    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, objectives: List[str]) -> str:
+        """Generate feedback with fallback mechanisms"""
+        try:
+            # Try Gemini first
+            feedback = await self.gemini_client.generate_feedback(
+                conversation_history=conversation_history,
+                scenario_name=scenario_name,
+                character_name=character_name,
+                scenario_objectives=objectives
+            )
+            return feedback
+        except Exception as e:
+            logger.warning(f"Gemini feedback generation failed: {e}")
+            
+            # Fallback to Groq
+            try:
+                feedback_prompt = f"""Provide constructive feedback on this social skills conversation:
+
+Scenario: {scenario_name}
+Character: {character_name}
+Objectives: {', '.join(objectives)}
+
+Conversation:
+{self._format_conversation_for_feedback(conversation_history)}
+
+Give feedback on:
+1. Communication strengths
+2. Areas for improvement  
+3. Key takeaways
+4. Overall assessment
+
+Keep it constructive and specific."""
+                
+                feedback = await self.groq_client.generate_response(
+                    user_message=feedback_prompt,
+                    system_prompt="You are a social skills coach providing constructive feedback.",
+                    model_type="fast"
+                )
+                return feedback
+            except Exception as e2:
+                logger.error(f"Groq fallback also failed: {e2}")
+                
+                # Final fallback - basic feedback
+                return self._generate_basic_feedback(conversation_history, scenario_name, character_name)
+    
+    def _format_conversation_for_feedback(self, conversation_history: List[Dict]) -> str:
+        """Format conversation history for feedback analysis"""
+        formatted = []
+        for msg in conversation_history:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            character = msg.get("character", "")
+            
+            if role == "user":
+                formatted.append(f"USER: {content}")
+            elif role == "assistant":
+                formatted.append(f"{character}: {content}")
+        
+        return "\n".join(formatted)
+    
+    def _generate_basic_feedback(self, conversation_history: List[Dict], scenario_name: str, character_name: str) -> str:
+        """Generate basic feedback when all AI services fail"""
+        turn_count = len([msg for msg in conversation_history if msg.get("role") == "user"])
+        
+        return f"""**Basic Feedback for {scenario_name}**
+
+**Conversation Summary:**
+- You completed {turn_count} turns with {character_name}
+- Scenario: {scenario_name}
+
+**General Tips:**
+- Practice active listening and asking follow-up questions
+- Be authentic and genuine in your responses
+- Pay attention to the other person's emotional cues
+- Practice setting boundaries when needed
+
+**Next Steps:**
+- Try the scenario again with a different approach
+- Focus on one specific skill you want to improve
+- Consider practicing with different characters
+
+*Note: Advanced feedback analysis is temporarily unavailable.*"""
     
     async def _end_conversation_with_feedback_dm(self, message, user_id: int, session: Dict):
-        """End conversation and generate feedback for DM"""
+        """End conversation and generate feedback for DM with error boundaries"""
         try:
             # Send conversation end message
             embed = discord.Embed(
@@ -116,17 +276,17 @@ class FlirBot(commands.Bot):
             )
             await message.channel.send(embed=embed)
             
-            # Generate feedback
+            # Generate feedback with fallback
             await message.channel.send("🤖 Analyzing your conversation and generating feedback...")
             
             current_character = session.get("current_character")
             character_name = current_character.name if current_character else "Unknown"
             
-            feedback = await self.gemini_client.generate_feedback(
-                conversation_history=session["conversation_history"],
-                scenario_name=session["scenario"].name,
-                character_name=character_name,
-                scenario_objectives=session["scenario"].objectives
+            feedback = await self._generate_feedback_with_fallback(
+                session["conversation_history"],
+                session["scenario"].name,
+                character_name,
+                session["scenario"].objectives
             )
             
             # Send feedback
@@ -159,12 +319,18 @@ class FlirBot(commands.Bot):
             
             # Clean up session
             del self.active_sessions[user_id]
+            self.save_sessions()
             
         except Exception as e:
+            if not self.handle_error(e, "DM feedback generation"):
+                await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
+                return
+            
             logger.error(f"Error generating feedback: {e}")
             await message.channel.send("❌ Error generating feedback. Session ended.")
             if user_id in self.active_sessions:
                 del self.active_sessions[user_id]
+                self.save_sessions()
     
     def load_commands(self):
         """Load all bot commands"""
@@ -223,38 +389,51 @@ class FlirBot(commands.Bot):
         
         @self.command(name="test")
         async def test_connections(ctx):
-            """Test API connections"""
-            await ctx.send("🔍 Testing connections...")
-            
-            # Test Groq connection
+            """Test API connections with error boundaries"""
             try:
-                groq_working = await self.groq_client.test_connection()
-                groq_status = "✅ Working" if groq_working else "❌ Failed"
+                await ctx.send("🔍 Testing connections...")
+                
+                # Test Groq connection
+                groq_working = False
+                try:
+                    groq_working = await self.groq_client.test_connection()
+                    groq_status = "✅ Working" if groq_working else "❌ Failed"
+                except Exception as e:
+                    groq_status = f"❌ Error: {str(e)}"
+                    self.handle_error(e, "Groq connection test")
+                
+                # Test Gemini connection
+                gemini_working = False
+                try:
+                    gemini_working = await self.gemini_client.test_connection()
+                    gemini_status = "✅ Working" if gemini_working else "❌ Failed"
+                except Exception as e:
+                    gemini_status = f"❌ Error: {str(e)}"
+                    self.handle_error(e, "Gemini connection test")
+                
+                all_working = groq_working and gemini_working
+                
+                embed = discord.Embed(
+                    title="🔧 Connection Test Results",
+                    color=0x00ff00 if all_working else 0xff0000
+                )
+                embed.add_field(name="Groq API", value=groq_status, inline=False)
+                embed.add_field(name="Gemini API", value=gemini_status, inline=False)
+                
+                if all_working:
+                    embed.add_field(name="Status", value="🎉 All systems ready for social skills training!", inline=False)
+                else:
+                    embed.add_field(name="Status", value="⚠️ Some services unavailable. Check your API keys.", inline=False)
+                
+                await ctx.send(embed=embed)
+                
             except Exception as e:
-                groq_status = f"❌ Error: {str(e)}"
-            
-            # Test Gemini connection
-            try:
-                gemini_working = await self.gemini_client.test_connection()
-                gemini_status = "✅ Working" if gemini_working else "❌ Failed"
-            except Exception as e:
-                gemini_status = f"❌ Error: {str(e)}"
-            
-            all_working = groq_working and gemini_working
-            
-            embed = discord.Embed(
-                title="🔧 Connection Test Results",
-                color=0x00ff00 if all_working else 0xff0000
-            )
-            embed.add_field(name="Groq API", value=groq_status, inline=False)
-            embed.add_field(name="Gemini API", value=gemini_status, inline=False)
-            
-            if all_working:
-                embed.add_field(name="Status", value="🎉 All systems ready for social skills training!", inline=False)
-            else:
-                embed.add_field(name="Status", value="⚠️ Some services unavailable. Check your API keys.", inline=False)
-            
-            await ctx.send(embed=embed)
+                if not self.handle_error(e, "connection test"):
+                    await ctx.send("🚨 Bot is experiencing issues. Please try again later.")
+                    return
+                
+                logger.error(f"Error in connection test: {e}")
+                await ctx.send("❌ Error testing connections. Please try again later.")
         
         @self.command(name="scenarios", aliases=["scenario"])
         async def list_scenarios(ctx, scenario_type: str = None):
@@ -461,36 +640,37 @@ class FlirBot(commands.Bot):
         
         @self.command(name="talk")
         async def talk_to_character(ctx, character_name: str, *, message: str = None):
-            """Talk to a character"""
-            user_id = ctx.author.id
-            
-            # Check if user has an active session
-            if user_id not in self.active_sessions:
-                await ctx.send("❌ You don't have an active session. Use `!start <scenario_id>` to begin a scenario.")
-                return
-            
-            session = self.active_sessions[user_id]
-            
-            # Find character
-            character = None
-            for char in session["characters"]:
-                if char.name.lower() == character_name.lower():
-                    character = char
-                    break
-            
-            if not character:
-                available_chars = ", ".join([char.name for char in session["characters"]])
-                await ctx.send(f"❌ Character '{character_name}' not available in this scenario. Available: {available_chars}")
-                return
-            
-            # If no message provided, just set current character
-            if not message:
-                session["current_character"] = character
-                await ctx.send(f"👤 Now talking to **{character.name}**. Send your message to continue the conversation.")
-                return
-            
-            # Process the message
+            """Talk to a character with error boundaries"""
             try:
+                user_id = ctx.author.id
+                
+                # Check if user has an active session
+                if user_id not in self.active_sessions:
+                    await ctx.send("❌ You don't have an active session. Use `!start <scenario_id>` to begin a scenario.")
+                    return
+                
+                session = self.active_sessions[user_id]
+                
+                # Find character
+                character = None
+                for char in session["characters"]:
+                    if char.name.lower() == character_name.lower():
+                        character = char
+                        break
+                
+                if not character:
+                    available_chars = ", ".join([char.name for char in session["characters"]])
+                    await ctx.send(f"❌ Character '{character_name}' not available in this scenario. Available: {available_chars}")
+                    return
+                
+                # If no message provided, just set current character
+                if not message:
+                    session["current_character"] = character
+                    self.save_sessions()
+                    await ctx.send(f"👤 Now talking to **{character.name}**. Send your message to continue the conversation.")
+                    return
+                
+                # Process the message with error boundaries
                 await ctx.send(f"🤔 {character.name} is thinking...")
                 
                 # Add user message to conversation history
@@ -503,12 +683,9 @@ class FlirBot(commands.Bot):
                 # Increment turn count
                 session["turn_count"] += 1
                 
-                # Generate response with conversation history
-                response = await self.groq_client.generate_response_with_history(
-                    user_message=message,
-                    system_prompt=character.generate_system_prompt(),
-                    conversation_history=session["conversation_history"],
-                    model_type="fast"
+                # Generate response with fallback
+                response = await self._generate_character_response_with_fallback(
+                    message, character, session["conversation_history"]
                 )
                 
                 # Add character response to conversation history
@@ -531,13 +708,52 @@ class FlirBot(commands.Bot):
                 
                 await ctx.send(embed=embed)
                 
+                # Save session state
+                self.save_sessions()
+                
                 # Check if conversation should end
                 if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
                     await self._end_conversation_with_feedback(ctx, user_id, session)
                 
             except Exception as e:
-                logger.error(f"Error generating response: {e}")
+                if not self.handle_error(e, "character conversation"):
+                    await ctx.send("🚨 Bot is experiencing issues. Please try again later.")
+                    return
+                
+                logger.error(f"Error in character conversation: {e}")
                 await ctx.send(f"❌ Sorry, I encountered an error. Please try again.")
+    
+    async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict]) -> str:
+        """Generate character response with fallback mechanisms"""
+        try:
+            # Try Groq first
+            response = await self.groq_client.generate_response_with_history(
+                user_message=message,
+                system_prompt=character.generate_system_prompt(),
+                conversation_history=conversation_history,
+                model_type="fast"
+            )
+            return response
+        except Exception as e:
+            logger.warning(f"Groq response generation failed: {e}")
+            
+            # Fallback to basic response
+            try:
+                response = await self.groq_client.generate_response(
+                    user_message=message,
+                    system_prompt=character.generate_system_prompt(),
+                    model_type="fast"
+                )
+                return response
+            except Exception as e2:
+                logger.error(f"Groq fallback also failed: {e2}")
+                
+                # Final fallback - basic response
+                return self._generate_basic_character_response(character, message)
+    
+    def _generate_basic_character_response(self, character: CharacterPersona, message: str) -> str:
+        """Generate basic character response when all AI services fail"""
+        return f"*{character.name} is having trouble responding right now. They seem to be thinking about what you said: '{message[:50]}...'*"
         
         @self.command(name="end")
         async def end_session(ctx):
@@ -653,24 +869,24 @@ class FlirBot(commands.Bot):
         # Handle direct messages to characters when in a session
         @self.event
         async def on_message(message):
-            # Ignore bot messages
-            if message.author.bot:
-                return
-            
-            # Process commands first
-            await self.process_commands(message)
-            
-            # Handle direct messages to characters
-            user_id = message.author.id
-            if (user_id in self.active_sessions and 
-                not message.content.startswith(Config.BOT_PREFIX) and
-                message.guild is None):  # Direct message
+            try:
+                # Ignore bot messages
+                if message.author.bot:
+                    return
                 
-                session = self.active_sessions[user_id]
-                current_char = session.get("current_character")
+                # Process commands first
+                await self.process_commands(message)
                 
-                if current_char:
-                    try:
+                # Handle direct messages to characters
+                user_id = message.author.id
+                if (user_id in self.active_sessions and 
+                    not message.content.startswith(Config.BOT_PREFIX) and
+                    message.guild is None):  # Direct message
+                    
+                    session = self.active_sessions[user_id]
+                    current_char = session.get("current_character")
+                    
+                    if current_char:
                         await message.channel.send(f"🤔 {current_char.name} is thinking...")
                         
                         # Add user message to conversation history
@@ -683,12 +899,9 @@ class FlirBot(commands.Bot):
                         # Increment turn count
                         session["turn_count"] += 1
                         
-                        # Generate response with conversation history
-                        response = await self.groq_client.generate_response_with_history(
-                            user_message=message.content,
-                            system_prompt=current_char.generate_system_prompt(),
-                            conversation_history=session["conversation_history"],
-                            model_type="fast"
+                        # Generate response with fallback
+                        response = await self._generate_character_response_with_fallback(
+                            message.content, current_char, session["conversation_history"]
                         )
                         
                         # Add character response to conversation history
@@ -710,47 +923,122 @@ class FlirBot(commands.Bot):
                         
                         await message.channel.send(embed=embed)
                         
+                        # Save session state
+                        self.save_sessions()
+                        
                         # Check if conversation should end
                         if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
                             await self._end_conversation_with_feedback_dm(message, user_id, session)
                         
-                    except Exception as e:
-                        logger.error(f"Error in character response: {e}")
-                        await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
+            except Exception as e:
+                if not self.handle_error(e, "message handling"):
+                    if message.guild is None:  # DM
+                        await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
+                    return
+                
+                logger.error(f"Error in message handling: {e}")
+                if message.guild is None:  # DM
+                    await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
 
 async def health_check(request):
-    """Health check endpoint for Render"""
-    return web.Response(text="Flir Bot is running!", status=200)
+    """Health check endpoint for Render with error boundaries"""
+    try:
+        # Basic health check
+        status = {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "bot_ready": True,
+            "active_sessions": len(getattr(request.app, 'bot', None).active_sessions if hasattr(request.app, 'bot') else 0)
+        }
+        
+        return web.json_response(status, status=200)
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return web.json_response(
+            {"status": "unhealthy", "error": str(e)}, 
+            status=500
+        )
 
 async def start_web_server():
-    """Start a simple web server for health checks"""
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    app.router.add_get('/health', health_check)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.getenv('PORT', 8000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"Health check server started on port {port}")
+    """Start a simple web server for health checks with error boundaries"""
+    try:
+        app = web.Application()
+        app.router.add_get('/', health_check)
+        app.router.add_get('/health', health_check)
+        
+        runner = web.AppRunner(app)
+        await runner.setup()
+        
+        port = int(os.getenv('PORT', 8000))
+        site = web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        logger.info(f"✅ Health check server started on port {port}")
+    except Exception as e:
+        logger.error(f"Failed to start web server: {e}")
+        raise
 
 async def main():
-    """Main function to run the bot"""
+    """Main function to run the bot with error boundaries"""
     try:
         # Validate configuration
         Config.validate()
+        logger.info("✅ Configuration validated successfully")
         
         # Start health check server
         await start_web_server()
+        logger.info("✅ Health check server started")
         
         # Create and run bot
         bot = FlirBot()
+        logger.info("✅ Bot initialized successfully")
+        
+        # Add periodic session saving
+        async def save_sessions_periodically():
+            while True:
+                await asyncio.sleep(300)  # Save every 5 minutes
+                try:
+                    bot.save_sessions()
+                except Exception as e:
+                    logger.error(f"Error saving sessions: {e}")
+        
+        # Start session saving task
+        asyncio.create_task(save_sessions_periodically())
+        
+        # Add graceful shutdown handler
+        async def graceful_shutdown():
+            logger.info("🔄 Gracefully shutting down bot...")
+            try:
+                # Save all active sessions
+                bot.save_sessions()
+                logger.info("✅ Sessions saved successfully")
+                
+                # Close HTTP sessions
+                if hasattr(bot, 'groq_client'):
+                    await bot.groq_client.close()
+                
+                # Close bot connection
+                await bot.close()
+                logger.info("✅ Bot shutdown complete")
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+        
+        # Register shutdown handler
+        import signal
+        import sys
+        
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+            asyncio.create_task(graceful_shutdown())
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        # Start the bot
         await bot.start(Config.DISCORD_BOT_TOKEN)
         
     except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
+        logger.critical(f"Failed to start bot: {e}")
+        logger.critical(f"Traceback: {traceback.format_exc()}")
         raise
 
 if __name__ == "__main__":
