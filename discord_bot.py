@@ -59,6 +59,9 @@ class FlirBot(commands.Bot):
         self.session_file = Path("active_sessions.pkl")
         self.load_sessions()
         
+        # Session timeout (30 minutes)
+        self.session_timeout = 30 * 60  # 30 minutes in seconds
+        
         # Error tracking
         self.error_count = 0
         self.last_error_time = None
@@ -68,17 +71,44 @@ class FlirBot(commands.Bot):
         self.load_commands()
     
     def load_sessions(self):
-        """Load active sessions from disk"""
+        """Load active sessions from disk and validate them"""
         try:
             if self.session_file.exists():
                 with open(self.session_file, 'rb') as f:
                     self.active_sessions = pickle.load(f)
+                
+                # Validate and clean up expired sessions
+                expired_sessions = []
+                for user_id, session in self.active_sessions.items():
+                    if self._is_session_expired(session):
+                        expired_sessions.append(user_id)
+                
+                # Remove expired sessions
+                for user_id in expired_sessions:
+                    del self.active_sessions[user_id]
+                    logger.info(f"🗑️ Removed expired session for user {user_id}")
+                
+                if expired_sessions:
+                    self.save_sessions()  # Save cleaned sessions
+                
                 logger.info(f"✅ Loaded {len(self.active_sessions)} active sessions")
             else:
                 logger.info("No existing sessions found")
         except Exception as e:
             logger.error(f"❌ Failed to load sessions: {e}")
             self.active_sessions = {}
+    
+    def _is_session_expired(self, session: Dict) -> bool:
+        """Check if a session has expired"""
+        if "created_at" not in session:
+            # Old sessions without timestamp are considered expired
+            return True
+        
+        created_at = session["created_at"]
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        
+        return (datetime.now() - created_at).total_seconds() > self.session_timeout
     
     def save_sessions(self):
         """Save active sessions to disk"""
@@ -115,7 +145,7 @@ class FlirBot(commands.Bot):
             return False
         return True
     
-    async def _end_conversation_with_feedback(self, ctx, user_id: int, session: Dict):
+    async def _end_conversation_with_feedback(self, ctx_or_message, user_id: int, session: Dict):
         """End conversation and generate feedback with error boundaries"""
         try:
             # Send conversation end message
@@ -124,10 +154,17 @@ class FlirBot(commands.Bot):
                 description=f"Great job completing the **{session['scenario'].name}** scenario! Generating your personalized feedback...",
                 color=0xff6600
             )
-            await ctx.send(embed=embed)
+            # Handle both ctx and message objects
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send(embed=embed)
+            else:
+                await ctx_or_message.channel.send(embed=embed)
             
             # Generate feedback with fallback
-            await ctx.send("🤖 Analyzing your conversation and generating feedback...")
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send("🤖 Analyzing your conversation and generating feedback...")
+            else:
+                await ctx_or_message.channel.send("🤖 Analyzing your conversation and generating feedback...")
             
             current_character = session.get("current_character")
             character_name = current_character.name if current_character else "Unknown"
@@ -165,7 +202,10 @@ class FlirBot(commands.Bot):
                 )
             
             feedback_embed.set_footer(text="Use !start <scenario_id> to try another scenario!")
-            await ctx.send(embed=feedback_embed)
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send(embed=feedback_embed)
+            else:
+                await ctx_or_message.channel.send(embed=feedback_embed)
             
             # Clean up session
             del self.active_sessions[user_id]
@@ -173,11 +213,17 @@ class FlirBot(commands.Bot):
             
         except Exception as e:
             if not self.handle_error(e, "feedback generation"):
-                await ctx.send("🚨 Bot is experiencing issues. Please try again later.")
+                if hasattr(ctx_or_message, 'send'):
+                    await ctx_or_message.send("🚨 Bot is experiencing issues. Please try again later.")
+                else:
+                    await ctx_or_message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
                 return
             
             logger.error(f"Error generating feedback: {e}")
-            await ctx.send("❌ Error generating feedback. Session ended.")
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send("❌ Error generating feedback. Session ended.")
+            else:
+                await ctx_or_message.channel.send("❌ Error generating feedback. Session ended.")
             if user_id in self.active_sessions:
                 del self.active_sessions[user_id]
                 self.save_sessions()
@@ -265,72 +311,6 @@ Keep it constructive and specific."""
 
 *Note: Advanced feedback analysis is temporarily unavailable.*"""
     
-    async def _end_conversation_with_feedback_dm(self, message, user_id: int, session: Dict):
-        """End conversation and generate feedback for DM with error boundaries"""
-        try:
-            # Send conversation end message
-            embed = discord.Embed(
-                title="🏁 Conversation Complete!",
-                description=f"Great job completing the **{session['scenario'].name}** scenario! Generating your personalized feedback...",
-                color=0xff6600
-            )
-            await message.channel.send(embed=embed)
-            
-            # Generate feedback with fallback
-            await message.channel.send("🤖 Analyzing your conversation and generating feedback...")
-            
-            current_character = session.get("current_character")
-            character_name = current_character.name if current_character else "Unknown"
-            
-            feedback = await self._generate_feedback_with_fallback(
-                session["conversation_history"],
-                session["scenario"].name,
-                character_name,
-                session["scenario"].objectives
-            )
-            
-            # Send feedback
-            feedback_embed = discord.Embed(
-                title="📊 Your Performance Feedback",
-                description=f"**Scenario:** {session['scenario'].name}\n**Character:** {character_name}\n**Turns:** {session['turn_count']}",
-                color=0x00ff00
-            )
-            
-            # Split feedback into chunks if too long
-            if len(feedback) > 2000:
-                # Split by sections
-                sections = feedback.split('\n\n')
-                for section in sections[:3]:  # Show first 3 sections
-                    if section.strip():
-                        feedback_embed.add_field(
-                            name="📝 Feedback",
-                            value=section[:1000] + "..." if len(section) > 1000 else section,
-                            inline=False
-                        )
-            else:
-                feedback_embed.add_field(
-                    name="📝 Feedback",
-                    value=feedback,
-                    inline=False
-                )
-            
-            feedback_embed.set_footer(text="Use !start <scenario_id> to try another scenario!")
-            await message.channel.send(embed=feedback_embed)
-            
-            # Clean up session
-            del self.active_sessions[user_id]
-            self.save_sessions()
-            
-        except Exception as e:
-            if not self.handle_error(e, "DM feedback generation"):
-                await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
-                return
-            
-            logger.error(f"Error generating feedback: {e}")
-            await message.channel.send("❌ Error generating feedback. Session ended.")
-            if user_id in self.active_sessions:
-                del self.active_sessions[user_id]
-                self.save_sessions()
     
     def load_commands(self):
         """Load all bot commands"""
@@ -602,7 +582,8 @@ Keep it constructive and specific."""
                 "context": scenario.context,
                 "current_character": None,
                 "conversation_history": [],
-                "turn_count": 0
+                "turn_count": 0,
+                "created_at": datetime.now()
             }
             
             # Send scenario introduction
@@ -755,28 +736,6 @@ Keep it constructive and specific."""
         """Generate basic character response when all AI services fail"""
         return f"*{character.name} is having trouble responding right now. They seem to be thinking about what you said: '{message[:50]}...'*"
         
-        @self.command(name="end")
-        async def end_session(ctx):
-            """End current session"""
-            user_id = ctx.author.id
-            
-            if user_id not in self.active_sessions:
-                await ctx.send("❌ You don't have an active session to end.")
-                return
-            
-            session = self.active_sessions[user_id]
-            scenario_name = session["scenario"].name
-            
-            del self.active_sessions[user_id]
-            
-            embed = discord.Embed(
-                title="🏁 Session Ended",
-                description=f"Your session with **{scenario_name}** has ended. Great job practicing your social skills!",
-                color=0xff6600
-            )
-            
-            await ctx.send(embed=embed)
-        
         @self.command(name="status")
         async def session_status(ctx):
             """Check current session status"""
@@ -866,6 +825,30 @@ Keep it constructive and specific."""
             
             await ctx.send(embed=embed)
         
+        @self.command(name="end")
+        async def end_session(ctx):
+            """End current session"""
+            user_id = ctx.author.id
+            
+            if user_id not in self.active_sessions:
+                await ctx.send("❌ You don't have an active session to end.")
+                return
+            
+            session = self.active_sessions[user_id]
+            scenario_name = session["scenario"].name
+            
+            # Clean up session
+            del self.active_sessions[user_id]
+            self.save_sessions()  # Save the updated sessions
+            
+            embed = discord.Embed(
+                title="🏁 Session Ended",
+                description=f"Your session with **{scenario_name}** has ended. Great job practicing your social skills!",
+                color=0xff6600
+            )
+            
+            await ctx.send(embed=embed)
+        
         # Handle direct messages to characters when in a session
         @self.event
         async def on_message(message):
@@ -881,7 +864,7 @@ Keep it constructive and specific."""
                 user_id = message.author.id
                 if (user_id in self.active_sessions and 
                     not message.content.startswith(Config.BOT_PREFIX) and
-                    message.guild is None):  # Direct message
+                    message.guild is None):  # Direct message only
                     
                     session = self.active_sessions[user_id]
                     current_char = session.get("current_character")
@@ -928,7 +911,7 @@ Keep it constructive and specific."""
                         
                         # Check if conversation should end
                         if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
-                            await self._end_conversation_with_feedback_dm(message, user_id, session)
+                            await self._end_conversation_with_feedback(message, user_id, session)
                         
             except Exception as e:
                 if not self.handle_error(e, "message handling"):
@@ -992,7 +975,7 @@ async def main():
         bot = FlirBot()
         logger.info("✅ Bot initialized successfully")
         
-        # Add periodic session saving
+        # Add periodic session saving and cleanup
         async def save_sessions_periodically():
             while True:
                 await asyncio.sleep(300)  # Save every 5 minutes
@@ -1001,8 +984,26 @@ async def main():
                 except Exception as e:
                     logger.error(f"Error saving sessions: {e}")
         
-        # Start session saving task
+        async def cleanup_expired_sessions():
+            while True:
+                await asyncio.sleep(600)  # Check every 10 minutes
+                try:
+                    expired_sessions = []
+                    for user_id, session in bot.active_sessions.items():
+                        if bot._is_session_expired(session):
+                            expired_sessions.append(user_id)
+                    
+                    if expired_sessions:
+                        for user_id in expired_sessions:
+                            del bot.active_sessions[user_id]
+                            logger.info(f"🗑️ Cleaned up expired session for user {user_id}")
+                        bot.save_sessions()
+                except Exception as e:
+                    logger.error(f"Error cleaning up sessions: {e}")
+        
+        # Start background tasks
         asyncio.create_task(save_sessions_periodically())
+        asyncio.create_task(cleanup_expired_sessions())
         
         # Add graceful shutdown handler
         async def graceful_shutdown():
