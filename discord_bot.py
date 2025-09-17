@@ -850,78 +850,78 @@ Keep it constructive and specific."""
             await ctx.send(embed=embed)
     
     # Handle direct messages to characters when in a session
-    @self.event
-    async def on_message(self, message):
-        try:
-            # Ignore bot messages
-            if message.author.bot:
-                return
+        @self.event
+        async def on_message(self, message):
+            try:
+                # Ignore bot messages
+                if message.author.bot:
+                    return
             
-            # Process commands first
-            await self.process_commands(message)
+                # Process commands first
+                await self.process_commands(message)
             
-            # Handle direct messages to characters
-            user_id = message.author.id
-            if (user_id in self.active_sessions and 
-                not message.content.startswith(Config.BOT_PREFIX) and
-                message.guild is None):  # Direct message only
+                # Handle direct messages to characters
+                user_id = message.author.id
+                if (user_id in self.active_sessions and 
+                    not message.content.startswith(Config.BOT_PREFIX) and
+                    message.guild is None):  # Direct message only
                 
-                session = self.active_sessions[user_id]
-                current_char = session.get("current_character")
+                    session = self.active_sessions[user_id]
+                    current_char = session.get("current_character")
                 
-                if current_char:
-                    await message.channel.send(f"🤔 {current_char.name} is thinking...")
+                    if current_char:
+                        await message.channel.send(f"🤔 {current_char.name} is thinking...")
                     
-                    # Add user message to conversation history
-                    session["conversation_history"].append({
-                        "role": "user",
-                        "content": message.content,
-                        "character": current_char.name
-                    })
+                        # Add user message to conversation history
+                        session["conversation_history"].append({
+                            "role": "user",
+                            "content": message.content,
+                          "character": current_char.name
+                        })
                     
-                    # Increment turn count
-                    session["turn_count"] += 1
+                        # Increment turn count
+                        session["turn_count"] += 1
                     
-                    # Generate response with fallback
-                    response = await self._generate_character_response_with_fallback(
-                        message.content, current_char, session["conversation_history"]
-                    )
+                        # Generate response with fallback
+                        response = await self._generate_character_response_with_fallback(
+                            message.content, current_char, session["conversation_history"]
+                        )
                     
-                    # Add character response to conversation history
-                    session["conversation_history"].append({
-                        "role": "assistant",
-                        "content": response,
-                        "character": current_char.name
-                    })
+                        # Add character response to conversation history
+                        session["conversation_history"].append({
+                            "role": "assistant",
+                            "content": response,
+                            "character": current_char.name
+                        })
                     
-                    embed = discord.Embed(
-                        title=f"💬 {current_char.name}",
-                        description=response,
-                        color=0x0099ff
-                    )
+                        embed = discord.Embed(
+                            title=f"💬 {current_char.name}",
+                            description=response,
+                            color=0x0099ff
+                        )
                     
                     # Add turn counter to embed
-                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                        turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                        embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
                     
-                    await message.channel.send(embed=embed)
+                        await message.channel.send(embed=embed)
                     
                     # Save session state
-                    self.save_sessions()
+                        self.save_sessions()
                     
-                    # Check if conversation should end
-                    if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
-                        await self._end_conversation_with_feedback(message, user_id, session)
+                        # Check if conversation should end
+                        if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
+                            await self._end_conversation_with_feedback(message, user_id, session)
                     
-        except Exception as e:
-            if not self.handle_error(e, "message handling"):
-                if message.guild is None:  # DM
-                    await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
-                return
+            except Exception as e:
+                if not self.handle_error(e, "message handling"):
+                    if message.guild is None:  # DM
+                        await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
+                    return
             
-            logger.error(f"Error in message handling: {e}")
-            if message.guild is None:  # DM
-                await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
+                logger.error(f"Error in message handling: {e}")
+                if message.guild is None:  # DM
+                    await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
 
 async def health_check(request):
     """Health check endpoint for Render with error boundaries"""
