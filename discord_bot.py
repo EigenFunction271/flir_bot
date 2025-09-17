@@ -181,7 +181,7 @@ class FlirBot(commands.Bot):
             embed.add_field(
                 name="📋 Scenario Commands",
                 value="""`!scenarios` - List all available scenarios
-`!scenario <id>` - Start a specific scenario
+`!scenario-details <id>` - Get detailed scenario info
 `!scenarios workplace` - List workplace scenarios
 `!scenarios dating` - List dating scenarios
 `!scenarios family` - List family scenarios""",
@@ -287,11 +287,11 @@ class FlirBot(commands.Bot):
                 )
             
             if len(scenarios) > 10:
-                embed.set_footer(text=f"Showing 10 of {len(scenarios)} scenarios. Use !scenario <id> for details.")
+                embed.set_footer(text=f"Showing 10 of {len(scenarios)} scenarios. Use !scenario-details <id> for details.")
             
             await ctx.send(embed=embed)
         
-        @self.command(name="scenario")
+        @self.command(name="scenario-details", aliases=["scenario-info"])
         async def scenario_details(ctx, scenario_id: str):
             """Get detailed information about a specific scenario"""
             scenario = self.scenario_manager.get_scenario(scenario_id)
