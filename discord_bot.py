@@ -238,6 +238,28 @@ class FlirBot(commands.Bot):
         """
         message_lower = message.lower()
         
+        # Phrases that indicate the user is correcting or addressing a character, not switching
+        correction_phrases = [
+            "you're not", "you are not", "youre not", "youre not",
+            "that's not", "thats not", "that is not",
+            "wrong", "incorrect", "mistake",
+            "stop", "don't", "dont"
+        ]
+        
+        # Check if this is a correction rather than a switch request
+        is_correction = any(phrase in message_lower for phrase in correction_phrases)
+        if is_correction:
+            logger.info(f"🔄 SWITCH: Detected correction phrase, not switching characters")
+            return None
+        
+        # Look for explicit switch requests
+        switch_phrases = [
+            "talk to", "speak to", "switch to", "i want to talk to",
+            "let me talk to", "can i talk to", "i need to talk to"
+        ]
+        
+        has_switch_phrase = any(phrase in message_lower for phrase in switch_phrases)
+        
         # Look for character names in the message
         for character in available_characters:
             char_name_lower = character.name.lower()
@@ -248,7 +270,12 @@ class FlirBot(commands.Bot):
                 import re
                 pattern = r'\b' + re.escape(char_name_lower) + r'\b'
                 if re.search(pattern, message_lower):
-                    return character
+                    # Only switch if there's an explicit switch phrase OR if it's a simple name mention
+                    if has_switch_phrase or (len(message_lower.split()) <= 3 and char_name_lower in message_lower.split()):
+                        logger.info(f"🔄 SWITCH: Detected switch request to {character.name}")
+                        return character
+                    else:
+                        logger.info(f"🔄 SWITCH: Character {character.name} mentioned but no switch phrase detected")
         
         return None
     
