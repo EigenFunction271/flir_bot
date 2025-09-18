@@ -56,7 +56,7 @@ Guidelines:
 - React appropriately to the user's approach and tone
 - Remember previous context in the conversation{aggressive_instructions}
 
-Respond as {self.name} would, maintaining consistency with your defined personality and communication style."""
+Respond as {self.reference} would, maintaining consistency with your defined personality and communication style."""
 
 class CharacterManager:
     """Manages all character personas and their selection"""
