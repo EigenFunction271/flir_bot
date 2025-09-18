@@ -924,111 +924,111 @@ Keep it constructive and specific."""
         """Generate basic character response when all AI services fail"""
         return f"*{character.name} is having trouble responding right now. They seem to be thinking about what you said: '{message[:50]}...'*"
     
-    @self.command(name="status")
-    async def session_status(ctx):
-        """Check current session status"""
-        user_id = ctx.author.id
-        
-        if user_id not in self.active_sessions:
-            await ctx.send("❌ You don't have an active session.")
-            return
-        
-        session = self.active_sessions[user_id]
-        
-        # Validate session structure
-        if not isinstance(session, dict) or "scenario" not in session:
-            logger.error(f"Invalid session structure for user {user_id}")
-            del self.active_sessions[user_id]
-            await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
-            return
-        
-        scenario = session["scenario"]
-        current_char = session.get("current_character")
-        
-        embed = discord.Embed(
-            title="📊 Session Status",
-            color=0x00ff00
-        )
-        
-        embed.add_field(
-            name="🎬 Current Scenario",
-            value=scenario.name,
-            inline=True
-        )
-        
-        embed.add_field(
-            name="👤 Current Character",
-            value=current_char.name if current_char else "None selected",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🔄 Turn Count",
-            value=f"{session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="👥 Available Characters",
-            value=", ".join([char.name for char in session["characters"]]),
-            inline=False
-        )
-        
-        await ctx.send(embed=embed)
-    
-    @self.command(name="history", aliases=["chat"])
-    async def conversation_history(ctx):
-        """View conversation history for current session"""
-        user_id = ctx.author.id
-        
-        if user_id not in self.active_sessions:
-            await ctx.send("❌ You don't have an active session.")
-            return
-        
-        session = self.active_sessions[user_id]
-        
-        # Validate session structure
-        if not isinstance(session, dict) or "scenario" not in session:
-            logger.error(f"Invalid session structure for user {user_id}")
-            del self.active_sessions[user_id]
-            await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
-            return
-        
-        history = session.get("conversation_history", [])
-        
-        if not history:
-            await ctx.send("📝 No conversation history yet. Start talking to a character!")
-            return
-        
-        embed = discord.Embed(
-            title="📝 Conversation History",
-            description=f"**Scenario:** {session['scenario'].name}",
-            color=0x0099ff
-        )
-        
-        # Show last 10 messages to avoid embed limits
-        recent_history = history[-10:] if len(history) > 10 else history
-        
-        for i, msg in enumerate(recent_history, 1):
-            role_emoji = "👤" if msg["role"] == "user" else "🤖"
-            character_name = msg.get("character", "Unknown")
+        @self.command(name="status")
+        async def session_status(ctx):
+            """Check current session status"""
+            user_id = ctx.author.id
             
-            # Truncate long messages
-            content = msg["content"]
-            if len(content) > 200:
-                content = content[:200] + "..."
+            if user_id not in self.active_sessions:
+                await ctx.send("❌ You don't have an active session.")
+                return
+            
+            session = self.active_sessions[user_id]
+            
+            # Validate session structure
+            if not isinstance(session, dict) or "scenario" not in session:
+                logger.error(f"Invalid session structure for user {user_id}")
+                del self.active_sessions[user_id]
+                await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
+                return
+            
+            scenario = session["scenario"]
+            current_char = session.get("current_character")
+            
+            embed = discord.Embed(
+                title="📊 Session Status",
+                color=0x00ff00
+            )
             
             embed.add_field(
-                name=f"{role_emoji} {character_name if msg['role'] == 'assistant' else 'You'}",
-                value=content,
+                name="🎬 Current Scenario",
+                value=scenario.name,
+                inline=True
+            )
+            
+            embed.add_field(
+                name="👤 Current Character",
+                value=current_char.name if current_char else "None selected",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="🔄 Turn Count",
+                value=f"{session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="👥 Available Characters",
+                value=", ".join([char.name for char in session["characters"]]),
                 inline=False
             )
+            
+            await ctx.send(embed=embed)
         
-        if len(history) > 10:
-            embed.set_footer(text=f"Showing last 10 of {len(history)} messages")
+        @self.command(name="history", aliases=["chat"])
+        async def conversation_history(ctx):
+            """View conversation history for current session"""
+            user_id = ctx.author.id
+            
+            if user_id not in self.active_sessions:
+                await ctx.send("❌ You don't have an active session.")
+                return
+            
+            session = self.active_sessions[user_id]
+            
+            # Validate session structure
+            if not isinstance(session, dict) or "scenario" not in session:
+                logger.error(f"Invalid session structure for user {user_id}")
+                del self.active_sessions[user_id]
+                await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
+                return
+            
+            history = session.get("conversation_history", [])
+            
+            if not history:
+                await ctx.send("📝 No conversation history yet. Start talking to a character!")
+                return
+            
+            embed = discord.Embed(
+                title="📝 Conversation History",
+                description=f"**Scenario:** {session['scenario'].name}",
+                color=0x0099ff
+            )
+            
+            # Show last 10 messages to avoid embed limits
+            recent_history = history[-10:] if len(history) > 10 else history
+            
+            for i, msg in enumerate(recent_history, 1):
+                role_emoji = "👤" if msg["role"] == "user" else "🤖"
+                character_name = msg.get("character", "Unknown")
+                
+                # Truncate long messages
+                content = msg["content"]
+                if len(content) > 200:
+                    content = content[:200] + "..."
+                
+                embed.add_field(
+                    name=f"{role_emoji} {character_name if msg['role'] == 'assistant' else 'You'}",
+                    value=content,
+                    inline=False
+                )
+            
+            if len(history) > 10:
+                embed.set_footer(text=f"Showing last 10 of {len(history)} messages")
+            
+            await ctx.send(embed=embed)
         
-        await ctx.send(embed=embed)
-    
         @self.command(name="end")
         async def end_session(ctx):
             """End current session"""
