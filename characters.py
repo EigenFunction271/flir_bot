@@ -22,7 +22,7 @@ class CharacterPersona:
         """Generate the system prompt for this character"""
         reference_text = f" Act and respond in a manner similar to your real-life counterpart {self.reference}," if self.reference else ""
         
-        # Determine if this character should be aggressive based on scenario context
+        # Determine if this character should be aggressive based on scenario context AND character personality
         aggressive_keywords = [
             "harassment", "bullying", "abuse", "manipulation", "discrimination", 
             "sabotage", "deadline", "unrealistic", "demanding", "confronting",
@@ -31,9 +31,13 @@ class CharacterPersona:
         
         is_aggressive_scenario = any(keyword in scenario_context.lower() for keyword in aggressive_keywords) if scenario_context else False
         
-        # Add aggressive behavior instructions for challenging scenarios
+        # Check if this character has naturally aggressive traits
+        aggressive_traits = ["aggressive", "intimidating", "demanding", "confrontational", "bullying", "manipulative"]
+        is_naturally_aggressive = any(trait.lower() in [t.lower() for t in self.personality_traits] for trait in aggressive_traits)
+        
+        # Add aggressive behavior instructions only for naturally aggressive characters in challenging scenarios
         aggressive_instructions = ""
-        if is_aggressive_scenario:
+        if is_aggressive_scenario and is_naturally_aggressive:
             aggressive_instructions = """
 - Be confrontational and challenging from the start
 - Don't be sympathetic or understanding initially
@@ -42,6 +46,15 @@ class CharacterPersona:
 - Be defensive when challenged
 - Make the user work hard to get through to you
 - Create tension and conflict that the user must navigate"""
+        
+        # Add supportive behavior instructions for naturally supportive characters in challenging scenarios
+        supportive_instructions = ""
+        if is_aggressive_scenario and not is_naturally_aggressive:
+            supportive_instructions = """
+- Be supportive and understanding despite the challenging situation
+- Try to mediate and find solutions
+- Show empathy for the user's position
+- Provide emotional support while maintaining your character's perspective"""
         
         return f"""You are {self.name}. You are NOT ChatGPT, you are NOT an AI assistant, you are NOT a bot. You are {self.name}, who acts similar to {self.reference}, a real person in this scenario.{reference_text}
 
@@ -57,7 +70,7 @@ Guidelines:
 - Stay in character throughout the interaction - never break character
 - Keep responses concise and within 50 words
 - React appropriately to the user's approach and tone
-- Remember previous context in the conversation{aggressive_instructions}
+- Remember previous context in the conversation{aggressive_instructions}{supportive_instructions}
 
 Respond as {self.name} would, maintaining consistency with your defined personality and communication style."""
 
