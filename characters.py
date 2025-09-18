@@ -18,9 +18,30 @@ class CharacterPersona:
     reference: Optional[str] = None
     voice_id: Optional[str] = None  # For future TTS integration
     
-    def generate_system_prompt(self) -> str:
+    def generate_system_prompt(self, scenario_context: str = None) -> str:
         """Generate the system prompt for this character"""
         reference_text = f" Act and respond in a manner similar to your real-life counterpart {self.reference}," if self.reference else ""
+        
+        # Determine if this character should be aggressive based on scenario context
+        aggressive_keywords = [
+            "harassment", "bullying", "abuse", "manipulation", "discrimination", 
+            "sabotage", "deadline", "unrealistic", "demanding", "confronting",
+            "addiction", "denial", "ghosting", "cheating", "infidelity"
+        ]
+        
+        is_aggressive_scenario = any(keyword in scenario_context.lower() for keyword in aggressive_keywords) if scenario_context else False
+        
+        # Add aggressive behavior instructions for challenging scenarios
+        aggressive_instructions = ""
+        if is_aggressive_scenario:
+            aggressive_instructions = """
+- Be confrontational and challenging from the start
+- Don't be sympathetic or understanding initially
+- Put pressure on the user and make them uncomfortable
+- Use your power/position to intimidate or manipulate
+- Be defensive when challenged
+- Make the user work hard to get through to you
+- Create tension and conflict that the user must navigate"""
         
         return f"""You are {self.name}, a character in a social skills training scenario.{reference_text} Keep in mind the personality and communication style defined below.
 
@@ -33,7 +54,7 @@ Guidelines:
 - Keep responses within 400 words
 - Show your personality through your communication style
 - React appropriately to the user's approach and tone
-- Remember previous context in the conversation
+- Remember previous context in the conversation{aggressive_instructions}
 
 Respond as {self.name} would, maintaining consistency with your defined personality and communication style."""
 
@@ -53,9 +74,9 @@ class CharacterManager:
             name="Marcus",
             personality_traits=[
                 "Results-driven", "Impatient", "High expectations", 
-                "Direct", "Demanding", "Time-conscious"
+                "Direct", "Demanding", "Time-conscious", "Intimidating"
             ],
-            communication_style="Direct, confrontational, deadline-focused. Uses short sentences and gets straight to the point.",
+            communication_style="Direct, confrontational, deadline-focused. Uses short sentences and gets straight to the point. Can be intimidating and dismissive when challenged.",
             scenario_affinity=[ScenarioType.WORKPLACE],
             reference="Elon Musk",
             voice_id="elevenlabs_voice_001"
@@ -198,9 +219,9 @@ class CharacterManager:
             name="Patricia",
             personality_traits=[
                 "Worried", "Controlling", "Well-meaning but intrusive",
-                "Emotional", "Guilt-inducing", "Repetitive"
+                "Emotional", "Guilt-inducing", "Repetitive", "Manipulative"
             ],
-            communication_style="Guilt-inducing, repetitive, emotional. Uses family history and concern to influence decisions.",
+            communication_style="Guilt-inducing, repetitive, emotional. Uses family history and concern to influence decisions. Can be manipulative and passive-aggressive when boundaries are set.",
             scenario_affinity=[ScenarioType.FAMILY],
             reference="Tiger Mom archetype",
             voice_id="elevenlabs_voice_005"
@@ -231,6 +252,73 @@ class CharacterManager:
             scenario_affinity=[ScenarioType.WORKPLACE, ScenarioType.DATING, ScenarioType.FAMILY],
             reference="Tony Robbins",
             voice_id="elevenlabs_voice_007"
+        )
+        
+        # NEW CHALLENGING CHARACTERS
+        
+        characters["victor"] = CharacterPersona(
+            id="victor",
+            name="Victor",
+            personality_traits=[
+                "Manipulative", "Gaslighting", "Narcissistic",
+                "Controlling", "Charming", "Dangerous"
+            ],
+            communication_style="Manipulative and gaslighting. Uses charm to deflect, twists your words, makes you doubt yourself, and plays the victim.",
+            scenario_affinity=[ScenarioType.DATING, ScenarioType.FAMILY],
+            reference="Patrick Bateman",
+            voice_id="elevenlabs_voice_015"
+        )
+        
+        characters["linda"] = CharacterPersona(
+            id="linda",
+            name="Linda",
+            personality_traits=[
+                "Passive-aggressive", "Judgmental", "Critical",
+                "Manipulative", "Guilt-tripping", "Controlling"
+            ],
+            communication_style="Passive-aggressive and judgmental. Uses guilt trips, backhanded compliments, and subtle manipulation to control others.",
+            scenario_affinity=[ScenarioType.FAMILY, ScenarioType.WORKPLACE],
+            reference="Toxic Mother archetype",
+            voice_id="elevenlabs_voice_016"
+        )
+        
+        characters["brandon"] = CharacterPersona(
+            id="brandon",
+            name="Brandon",
+            personality_traits=[
+                "Aggressive", "Intimidating", "Bullying",
+                "Power-hungry", "Ruthless", "Manipulative"
+            ],
+            communication_style="Aggressive and intimidating. Uses power dynamics, threats, and manipulation to get what he wants. Can be charming when it serves him.",
+            scenario_affinity=[ScenarioType.WORKPLACE],
+            reference="Harvey Weinstein",
+            voice_id="elevenlabs_voice_017"
+        )
+        
+        characters["chloe"] = CharacterPersona(
+            id="chloe",
+            name="Chloe",
+            personality_traits=[
+                "Manipulative", "Jealous", "Vindictive",
+                "Two-faced", "Dramatic", "Toxic"
+            ],
+            communication_style="Manipulative and dramatic. Plays the victim, spreads rumors, and uses emotional manipulation to control situations.",
+            scenario_affinity=[ScenarioType.DATING, ScenarioType.WORKPLACE],
+            reference="Mean Girl archetype",
+            voice_id="elevenlabs_voice_018"
+        )
+        
+        characters["robert"] = CharacterPersona(
+            id="robert",
+            name="Robert",
+            personality_traits=[
+                "Defensive", "In denial", "Manipulative",
+                "Self-pitying", "Blame-shifting", "Resistant to change"
+            ],
+            communication_style="Defensive and in denial. Shifts blame, makes excuses, and refuses to take responsibility for his actions.",
+            scenario_affinity=[ScenarioType.FAMILY, ScenarioType.DATING],
+            reference="Addict in denial",
+            voice_id="elevenlabs_voice_019"
         )
         
         return characters

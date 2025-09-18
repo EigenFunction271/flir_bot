@@ -822,20 +822,16 @@ Keep it constructive and specific."""
             # Generate and send the opening message from the key character
             try:
                 # Create opening message prompt
-                opening_prompt = f"""You are {key_character.name} in this scenario: {scenario.name}
+                opening_prompt = f"""Start the conversation by sending an opening message to the user. This should be the first thing you say to them in this scenario. Be authentic to your character and set the tone for the interaction.
 
+Scenario: {scenario.name}
 Context: {scenario.context}
 
-Your personality traits: {', '.join(key_character.personality_traits)}
-Your communication style: {key_character.communication_style}
-
-Start the conversation by sending an opening message to the user. This should be the first thing you say to them in this scenario. Be authentic to your character and set the tone for the interaction.
-
-Keep it natural and engaging - this is the start of a social skills training conversation."""
+This is the start of a social skills training conversation. Be true to your character's personality and communication style."""
                 
-                # Generate opening message
+                # Generate opening message with scenario context
                 opening_message = await self._generate_character_response_with_fallback(
-                    opening_prompt, key_character, []
+                    opening_prompt, key_character, [], scenario.context
                 )
                 
                 # Add the opening message to conversation history
@@ -1083,7 +1079,7 @@ Keep it natural and engaging - this is the start of a social skills training con
                 
                     # Generate response with fallback
                     response = await self._generate_character_response_with_fallback(
-                        message.content, current_char, session["conversation_history"]
+                        message.content, current_char, session["conversation_history"], session["scenario"].context
                     )
                 
                     # Add character response to conversation history
@@ -1122,13 +1118,13 @@ Keep it natural and engaging - this is the start of a social skills training con
             if message.guild is None:  # DM
                 await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
     
-    async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict]) -> str:
+    async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict], scenario_context: str = None) -> str:
         """Generate character response with fallback mechanisms"""
         try:
             # Try Groq first
             response = await self.groq_client.generate_response_with_history(
                 user_message=message,
-                system_prompt=character.generate_system_prompt(),
+                system_prompt=character.generate_system_prompt(scenario_context),
                 conversation_history=conversation_history,
                 model_type="fast"
             )
@@ -1140,7 +1136,7 @@ Keep it natural and engaging - this is the start of a social skills training con
             try:
                 response = await self.groq_client.generate_response(
                     user_message=message,
-                    system_prompt=character.generate_system_prompt(),
+                    system_prompt=character.generate_system_prompt(scenario_context),
                     model_type="fast"
                 )
                 return response
