@@ -428,7 +428,7 @@ Keep it constructive and specific."""
             """Show available commands"""
             embed = discord.Embed(
                 title="🤖 Flir Social Skills Training Bot",
-                description="Practice difficult conversations with AI characters! Characters will message you first to start conversations.",
+                description="Practice difficult conversations with AI characters! Multiple characters will respond to create dynamic group conversations.",
                 color=0x00ff00
             )
             
@@ -813,60 +813,80 @@ Keep it constructive and specific."""
             
             embed.add_field(
                 name="💬 How to Interact",
-                value=f"**{key_character.name}** will send you a message to start the conversation. Respond directly to their message in DMs! To talk to other characters, just mention their name in your message.",
+                value=f"**All characters** will send you opening messages to start the conversation. Respond directly to their messages in DMs! All characters will respond to your messages, creating dynamic group conversations.",
                 inline=False
             )
             
             await ctx.send(embed=embed)
             
-            # Generate and send the opening message from the key character
+            # Generate and send opening messages from all characters
             try:
-                # Create opening message prompt
-                opening_prompt = f"""Start the conversation by sending an opening message to the user. This should be the first thing you say to them in this scenario. Be authentic to your character and set the tone for the interaction.
+                # Send opening messages to user's DM
+                try:
+                    dm_channel = await ctx.author.create_dm()
+                    
+                    # Get all characters in the scenario except coach
+                    scenario_characters = []
+                    for char_id in scenario.characters:
+                        if char_id.lower() != "kai":  # Exclude coach
+                            character = self.character_manager.get_character(char_id)
+                            if character:
+                                scenario_characters.append(character)
+                    
+                    # Generate opening message from each character
+                    for character in scenario_characters:
+                        try:
+                            # Create opening message prompt for this character
+                            opening_prompt = f"""Start the conversation by sending an opening message to the user. This should be the first thing you say to them in this scenario. Be authentic to your character and set the tone for the interaction.
 
 Scenario: {scenario.name}
 Context: {scenario.context}
 
 This is the start of a social skills training conversation. Be true to your character's personality and communication style."""
-                
-                # Generate opening message with scenario context
-                opening_message = await self._generate_character_response_with_fallback(
-                    opening_prompt, key_character, [], scenario.context
-                )
-                
-                # Add the opening message to conversation history
-                self.active_sessions[user_id]["conversation_history"].append({
-                    "role": "assistant",
-                    "content": opening_message,
-                    "character": key_character.name
-                })
-                
-                # Send opening message to user's DM
-                try:
-                    dm_channel = await ctx.author.create_dm()
-                    
-                    opening_embed = discord.Embed(
-                        title=f"💬 {key_character.name}",
-                        description=opening_message,
-                        color=0x0099ff
-                    )
-                    
-                    opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
-                    
-                    await dm_channel.send(embed=opening_embed)
+                            
+                            # Generate opening message with scenario context
+                            opening_message = await self._generate_character_response_with_fallback(
+                                opening_prompt, character, [], scenario.context
+                            )
+                            
+                            # Add the opening message to conversation history
+                            self.active_sessions[user_id]["conversation_history"].append({
+                                "role": "assistant",
+                                "content": opening_message,
+                                "character": character.name
+                            })
+                            
+                            # Create embed for this character's opening message
+                            opening_embed = discord.Embed(
+                                title=f"💬 {character.name}",
+                                description=opening_message,
+                                color=0x0099ff
+                            )
+                            
+                            opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
+                            
+                            await dm_channel.send(embed=opening_embed)
+                            
+                            # Small delay between character messages for better flow
+                            await asyncio.sleep(1)
+                            
+                        except Exception as e:
+                            logger.error(f"Error generating opening message for character {character.name}: {e}")
+                            continue
                     
                     # Save session state
                     self.save_sessions()
                     
                     # Send confirmation in the original channel
-                    await ctx.send(f"✅ **{key_character.name}** has sent you an opening message! Check your DMs to continue the conversation.")
+                    character_names = [char.name for char in scenario_characters]
+                    await ctx.send(f"✅ **{', '.join(character_names)}** have sent you opening messages! Check your DMs to continue the conversation.")
                     
                 except discord.Forbidden:
                     await ctx.send(f"❌ I couldn't send you a DM. Please check your privacy settings and allow DMs from server members.")
                     
             except Exception as e:
-                logger.error(f"Error generating opening message: {e}")
-                await ctx.send(f"❌ Error starting the conversation with {key_character.name}. Please try again.")
+                logger.error(f"Error generating opening messages: {e}")
+                await ctx.send(f"❌ Error starting the conversation. Please try again.")
         
         @self.command(name="status")
         async def session_status(ctx):
@@ -1077,29 +1097,10 @@ This is the start of a social skills training conversation. Be true to your char
                     # Increment turn count
                     session["turn_count"] += 1
                 
-                    # Generate response with fallback
-                    response = await self._generate_character_response_with_fallback(
-                        message.content, current_char, session["conversation_history"], session["scenario"].context
+                    # Generate responses from all characters in the scenario (except coach)
+                    await self._generate_multi_character_responses(
+                        message.content, session, message.channel
                     )
-                
-                    # Add character response to conversation history
-                    session["conversation_history"].append({
-                        "role": "assistant",
-                        "content": response,
-                        "character": current_char.name
-                    })
-                
-                    embed = discord.Embed(
-                        title=f"💬 {current_char.name}",
-                        description=response,
-                        color=0x0099ff
-                    )
-                
-                    # Add turn counter to embed
-                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
-                
-                    await message.channel.send(embed=embed)
                 
                     # Save session state
                     self.save_sessions()
@@ -1149,6 +1150,84 @@ This is the start of a social skills training conversation. Be true to your char
     def _generate_basic_character_response(self, character: CharacterPersona, message: str) -> str:
         """Generate basic character response when all AI services fail"""
         return f"*{character.name} is having trouble responding right now. They seem to be thinking about what you said: '{message[:50]}...'*"
+    
+    async def _generate_multi_character_responses(self, user_message: str, session: Dict, channel):
+        """Generate responses from all characters in the scenario (except coach)"""
+        try:
+            # Get all characters in the scenario except coach
+            scenario_characters = []
+            for char_id in session["scenario"].characters:
+                if char_id.lower() != "kai":  # Exclude coach
+                    character = self.character_manager.get_character(char_id)
+                    if character:
+                        scenario_characters.append(character)
+            
+            if not scenario_characters:
+                logger.warning("No characters found for multi-character response")
+                return
+            
+            # Generate responses from each character
+            for character in scenario_characters:
+                try:
+                    # Generate response for this character
+                    response = await self._generate_character_response_with_fallback(
+                        user_message, character, session["conversation_history"], session["scenario"].context
+                    )
+                    
+                    # Add character response to conversation history
+                    session["conversation_history"].append({
+                        "role": "assistant",
+                        "content": response,
+                        "character": character.name
+                    })
+                    
+                    # Create embed for this character's response
+                    embed = discord.Embed(
+                        title=f"💬 {character.name}",
+                        description=response,
+                        color=0x0099ff
+                    )
+                    
+                    # Add turn counter to embed
+                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                    
+                    # Send the response
+                    await channel.send(embed=embed)
+                    
+                    # Small delay between character responses for better flow
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    logger.error(f"Error generating response for character {character.name}: {e}")
+                    # Continue with other characters even if one fails
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error in multi-character response generation: {e}")
+            # Fallback to single character response
+            current_char = session.get("current_character")
+            if current_char:
+                response = await self._generate_character_response_with_fallback(
+                    user_message, current_char, session["conversation_history"], session["scenario"].context
+                )
+                
+                session["conversation_history"].append({
+                    "role": "assistant",
+                    "content": response,
+                    "character": current_char.name
+                })
+                
+                embed = discord.Embed(
+                    title=f"💬 {current_char.name}",
+                    description=response,
+                    color=0x0099ff
+                )
+                
+                turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                
+                await channel.send(embed=embed)
 
 async def health_check(request):
     """Health check endpoint for Render with error boundaries"""
