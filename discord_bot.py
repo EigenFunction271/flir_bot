@@ -1080,11 +1080,15 @@ This is the start of a social skills training conversation. Be true to your char
                 
                 if current_char:
                     # Validate user input
+                    logger.info(f"🔍 MESSAGE: Validating user input: '{message.content[:50]}...'")
                     is_valid, error_msg = self.validate_user_input(message.content)
                     if not is_valid:
+                        logger.warning(f"❌ MESSAGE: Input validation failed: {error_msg}")
                         await message.channel.send(f"❌ {error_msg}")
                         return
+                    logger.info(f"✅ MESSAGE: Input validation passed")
                     
+                    logger.info(f"🤔 MESSAGE: Sending thinking message for {current_char.name}")
                     await message.channel.send(f"🤔 {current_char.name} is thinking...")
                 
                     # Add user message to conversation history
@@ -1093,14 +1097,18 @@ This is the start of a social skills training conversation. Be true to your char
                         "content": message.content,
                         "character": current_char.name
                     })
+                    logger.info(f"📝 MESSAGE: Added user message to conversation history. Total messages: {len(session['conversation_history'])}")
                 
                     # Increment turn count
                     session["turn_count"] += 1
+                    logger.info(f"🔄 MESSAGE: Incremented turn count to {session['turn_count']}")
                 
                     # Generate responses from all characters in the scenario (except coach)
+                    logger.info(f"🎭 MESSAGE: Starting multi-character response generation for {len(session['scenario'].characters)} characters")
                     await self._generate_multi_character_responses(
                         message.content, session, message.channel
                     )
+                    logger.info(f"✅ MESSAGE: Completed multi-character response generation")
                 
                     # Save session state
                     self.save_sessions()
@@ -1122,6 +1130,10 @@ This is the start of a social skills training conversation. Be true to your char
     async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict], scenario_context: str = None) -> str:
         """Generate character response with fallback mechanisms"""
         try:
+            # Generate character-specific system prompt
+            system_prompt = character.generate_system_prompt(scenario_context)
+            logger.info(f"🎭 SYSTEM: Generated system prompt for {character.name}: {system_prompt[:100]}...")
+            
             # Try Groq first
             response = await self.groq_client.generate_response_with_history(
                 user_message=message,
@@ -1154,6 +1166,9 @@ This is the start of a social skills training conversation. Be true to your char
     async def _generate_multi_character_responses(self, user_message: str, session: Dict, channel):
         """Generate responses from all characters in the scenario (except coach)"""
         try:
+            logger.info(f"🎭 MULTI-CHAR: Starting multi-character response generation")
+            logger.info(f"🎭 MULTI-CHAR: Scenario characters: {session['scenario'].characters}")
+            
             # Get all characters in the scenario except coach
             scenario_characters = []
             for char_id in session["scenario"].characters:
@@ -1161,6 +1176,11 @@ This is the start of a social skills training conversation. Be true to your char
                     character = self.character_manager.get_character(char_id)
                     if character:
                         scenario_characters.append(character)
+                        logger.info(f"🎭 MULTI-CHAR: Added character: {character.name}")
+                    else:
+                        logger.warning(f"🎭 MULTI-CHAR: Character not found: {char_id}")
+            
+            logger.info(f"🎭 MULTI-CHAR: Found {len(scenario_characters)} characters to respond")
             
             if not scenario_characters:
                 logger.warning("No characters found for multi-character response")
@@ -1169,10 +1189,12 @@ This is the start of a social skills training conversation. Be true to your char
             # Generate responses from each character
             for character in scenario_characters:
                 try:
+                    logger.info(f"🎭 MULTI-CHAR: Generating response for {character.name}")
                     # Generate response for this character
                     response = await self._generate_character_response_with_fallback(
                         user_message, character, session["conversation_history"], session["scenario"].context
                     )
+                    logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
                     
                     # Add character response to conversation history
                     session["conversation_history"].append({
@@ -1193,7 +1215,9 @@ This is the start of a social skills training conversation. Be true to your char
                     embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
                     
                     # Send the response
+                    logger.info(f"🎭 MULTI-CHAR: Sending response from {character.name}")
                     await channel.send(embed=embed)
+                    logger.info(f"🎭 MULTI-CHAR: Successfully sent response from {character.name}")
                     
                     # Small delay between character responses for better flow
                     await asyncio.sleep(1)
