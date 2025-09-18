@@ -225,6 +225,33 @@ class FlirBot(commands.Bot):
         
         return True, ""
     
+    def detect_character_switch(self, message: str, available_characters: List) -> Optional[Any]:
+        """
+        Detect if the user is trying to switch to a different character by name
+        
+        Args:
+            message: The user's message
+            available_characters: List of available character objects
+            
+        Returns:
+            Character object if a switch is detected, None otherwise
+        """
+        message_lower = message.lower()
+        
+        # Look for character names in the message
+        for character in available_characters:
+            char_name_lower = character.name.lower()
+            
+            # Check for direct name mentions
+            if char_name_lower in message_lower:
+                # Make sure it's not just a partial match in the middle of a word
+                import re
+                pattern = r'\b' + re.escape(char_name_lower) + r'\b'
+                if re.search(pattern, message_lower):
+                    return character
+        
+        return None
+    
     async def _end_conversation_with_feedback(self, ctx_or_message, user_id: int, session: Dict):
         """End conversation and generate feedback with error boundaries"""
         try:
@@ -401,7 +428,7 @@ Keep it constructive and specific."""
             """Show available commands"""
             embed = discord.Embed(
                 title="🤖 Flir Social Skills Training Bot",
-                description="Practice difficult conversations with AI characters!",
+                description="Practice difficult conversations with AI characters! Characters will message you first to start conversations.",
                 color=0x00ff00
             )
             
@@ -418,14 +445,13 @@ Keep it constructive and specific."""
             embed.add_field(
                 name="👥 Character Commands",
                 value="""`!characters` - List all characters
-`!character <name>` - Get character info
-`!talk <character>` - Talk to a character directly""",
+`!character <name>` - Get character info""",
                 inline=False
             )
             
             embed.add_field(
                 name="🎮 Session Commands",
-                value="""`!start <scenario_id>` - Start a scenario
+                value="""`!start <scenario_id>` - Start a scenario (character will message you first!)
 `!end` - End current session
 `!status` - Check current session status
 `!history` - View conversation history""",
@@ -746,12 +772,15 @@ Keep it constructive and specific."""
                 await ctx.send("❌ No valid characters found for this scenario.")
                 return
             
-            # Create session
+            # Select the first character as the key character
+            key_character = characters[0]
+            
+            # Create session with the key character already selected
             self.active_sessions[user_id] = {
                 "scenario": scenario,
                 "characters": characters,
                 "context": scenario.context,
-                "current_character": None,
+                "current_character": key_character,
                 "conversation_history": [],
                 "turn_count": 0,
                 "created_at": datetime.now()
@@ -777,120 +806,71 @@ Keep it constructive and specific."""
             )
             
             embed.add_field(
-                name="👥 Available Characters",
-                value="\n".join(f"• {char.name} - {char.personality_traits[0]}" for char in characters),
+                name="👤 Key Character",
+                value=f"**{key_character.name}** - {key_character.personality_traits[0]}",
                 inline=False
             )
             
             embed.add_field(
                 name="💬 How to Interact",
-                value="Use `!talk <character_name>` to start talking to a character, or `!end` to end the session.",
+                value=f"**{key_character.name}** will send you a message to start the conversation. Respond directly to their message in DMs! To talk to other characters, just mention their name in your message.",
                 inline=False
             )
             
             await ctx.send(embed=embed)
-        
-        @self.command(name="talk")
-        async def talk_to_character(ctx, character_name: str, *, message: str = None):
-            """Talk to a character with error boundaries"""
+            
+            # Generate and send the opening message from the key character
             try:
-                user_id = ctx.author.id
-                logger.info(f"🔍 TALK COMMAND: User {user_id} ({ctx.author.name}) called !talk with character='{character_name}', message='{message}'")
+                # Create opening message prompt
+                opening_prompt = f"""You are {key_character.name} in this scenario: {scenario.name}
+
+Context: {scenario.context}
+
+Your personality traits: {', '.join(key_character.personality_traits)}
+Your communication style: {key_character.communication_style}
+
+Start the conversation by sending an opening message to the user. This should be the first thing you say to them in this scenario. Be authentic to your character and set the tone for the interaction.
+
+Keep it natural and engaging - this is the start of a social skills training conversation."""
                 
-                # Check if user has an active session
-                if user_id not in self.active_sessions:
-                    logger.warning(f"⚠️ TALK COMMAND: User {user_id} has no active session")
-                    await ctx.send("❌ You don't have an active session. Use `!start <scenario_id>` to begin a scenario.")
-                    return
-                
-                session = self.active_sessions[user_id]
-                logger.info(f"📊 TALK COMMAND: User {user_id} has active session with scenario: {session.get('scenario', {}).get('name', 'Unknown')}")
-                
-                # Find character
-                character = None
-                available_char_names = []
-                for char in session["characters"]:
-                    available_char_names.append(char.name)
-                    if char.name.lower() == character_name.lower():
-                        character = char
-                        break
-                
-                logger.info(f"🎭 TALK COMMAND: Available characters: {available_char_names}, looking for: '{character_name}'")
-                
-                if not character:
-                    available_chars = ", ".join(available_char_names)
-                    logger.warning(f"⚠️ TALK COMMAND: Character '{character_name}' not found. Available: {available_chars}")
-                    await ctx.send(f"❌ Character '{character_name}' not available in this scenario. Available: {available_chars}")
-                    return
-                
-                logger.info(f"✅ TALK COMMAND: Found character '{character.name}' for user {user_id}")
-                
-                # If no message provided, just set current character
-                if not message:
-                    session["current_character"] = character
-                    self.save_sessions()
-                    logger.info(f"🎯 TALK COMMAND: Set current character to '{character.name}' for user {user_id}")
-                    await ctx.send(f"👤 Now talking to **{character.name}**. Send your message to continue the conversation.")
-                    return
-                
-                # Validate user input
-                is_valid, error_msg = self.validate_user_input(message)
-                if not is_valid:
-                    await ctx.send(f"❌ {error_msg}")
-                    return
-                
-                # Process the message with error boundaries
-                await ctx.send(f"🤔 {character.name} is thinking...")
-                
-                # Add user message to conversation history
-                session["conversation_history"].append({
-                    "role": "user",
-                    "content": message,
-                    "character": character.name
-                })
-                
-                # Increment turn count
-                session["turn_count"] += 1
-                
-                # Generate response with fallback
-                response = await self._generate_character_response_with_fallback(
-                    message, character, session["conversation_history"]
+                # Generate opening message
+                opening_message = await self._generate_character_response_with_fallback(
+                    opening_prompt, key_character, []
                 )
                 
-                # Add character response to conversation history
-                session["conversation_history"].append({
+                # Add the opening message to conversation history
+                self.active_sessions[user_id]["conversation_history"].append({
                     "role": "assistant",
-                    "content": response,
-                    "character": character.name
+                    "content": opening_message,
+                    "character": key_character.name
                 })
                 
-                # Send response
-                embed = discord.Embed(
-                    title=f"💬 {character.name}",
-                    description=response,
-                    color=0x0099ff
-                )
-                
-                # Add turn counter to embed
-                turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
-                
-                await ctx.send(embed=embed)
-                
-                # Save session state
-                self.save_sessions()
-                
-                # Check if conversation should end
-                if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
-                    await self._end_conversation_with_feedback(ctx, user_id, session)
-                
+                # Send opening message to user's DM
+                try:
+                    dm_channel = await ctx.author.create_dm()
+                    
+                    opening_embed = discord.Embed(
+                        title=f"💬 {key_character.name}",
+                        description=opening_message,
+                        color=0x0099ff
+                    )
+                    
+                    opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
+                    
+                    await dm_channel.send(embed=opening_embed)
+                    
+                    # Save session state
+                    self.save_sessions()
+                    
+                    # Send confirmation in the original channel
+                    await ctx.send(f"✅ **{key_character.name}** has sent you an opening message! Check your DMs to continue the conversation.")
+                    
+                except discord.Forbidden:
+                    await ctx.send(f"❌ I couldn't send you a DM. Please check your privacy settings and allow DMs from server members.")
+                    
             except Exception as e:
-                if not self.handle_error(e, "character conversation"):
-                    await ctx.send("🚨 Bot is experiencing issues. Please try again later.")
-                    return
-                
-                logger.error(f"Error in character conversation: {e}")
-                await ctx.send(f"❌ Sorry, I encountered an error. Please try again.")
+                logger.error(f"Error generating opening message: {e}")
+                await ctx.send(f"❌ Error starting the conversation with {key_character.name}. Please try again.")
         
         @self.command(name="status")
         async def session_status(ctx):
@@ -1066,8 +1046,22 @@ Keep it constructive and specific."""
                     return
                 
                 current_char = session.get("current_character")
+                available_characters = session.get("characters", [])
                 logger.info(f"🎭 MESSAGE: Current character for user {user_id}: {current_char.name if current_char else 'None'}")
-            
+                
+                # Check if user is trying to switch to a different character
+                target_character = self.detect_character_switch(message.content, available_characters)
+                
+                if target_character and target_character != current_char:
+                    # User is switching to a different character
+                    logger.info(f"🔄 MESSAGE: User {user_id} switching from {current_char.name if current_char else 'None'} to {target_character.name}")
+                    session["current_character"] = target_character
+                    current_char = target_character
+                    self.save_sessions()
+                    
+                    # Send confirmation of character switch
+                    await message.channel.send(f"👤 Now talking to **{target_character.name}**")
+                
                 if current_char:
                     # Validate user input
                     is_valid, error_msg = self.validate_user_input(message.content)
