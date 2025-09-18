@@ -1032,103 +1032,101 @@ Keep it constructive and specific."""
             await ctx.send(embed=embed)
         
         logger.info("✅ All bot commands loaded successfully")
+    
+    async def on_message(self, message):
+        try:
+            # Ignore bot messages
+            if message.author.bot:
+                return
+            
+            logger.info(f"📨 MESSAGE: Received message from {message.author.name} ({message.author.id}): '{message.content[:100]}...' in {message.guild.name if message.guild else 'DM'}")
         
-        # Handle direct messages to characters when in a session
-        @self.event
-        async def on_message(self, message):
-            try:
-                # Ignore bot messages
-                if message.author.bot:
+            # Process commands first
+            await self.process_commands(message)
+            logger.info(f"✅ MESSAGE: Processed commands for message from {message.author.name}")
+        
+            # Handle direct messages to characters
+            user_id = message.author.id
+            logger.info(f"🔍 MESSAGE: Checking if user {user_id} has active session and message is not a command")
+            logger.info(f"📊 MESSAGE: User in active sessions: {user_id in self.active_sessions}")
+            logger.info(f"📊 MESSAGE: Message starts with prefix '{Config.BOT_PREFIX}': {message.content.startswith(Config.BOT_PREFIX)}")
+            logger.info(f"📊 MESSAGE: Is DM: {message.guild is None}")
+            
+            if (user_id in self.active_sessions and 
+                not message.content.startswith(Config.BOT_PREFIX) and
+                message.guild is None):  # Direct message only
+            
+                session = self.active_sessions[user_id]
+                
+                # Validate session structure
+                if not isinstance(session, dict) or "scenario" not in session:
+                    logger.error(f"Invalid session structure for user {user_id}")
+                    del self.active_sessions[user_id]
+                    await message.channel.send("❌ Your session is corrupted. Please start a new scenario.")
                     return
                 
-                logger.info(f"📨 MESSAGE: Received message from {message.author.name} ({message.author.id}): '{message.content[:100]}...' in {message.guild.name if message.guild else 'DM'}")
+                current_char = session.get("current_character")
+                logger.info(f"🎭 MESSAGE: Current character for user {user_id}: {current_char.name if current_char else 'None'}")
             
-                # Process commands first
-                await self.process_commands(message)
-                logger.info(f"✅ MESSAGE: Processed commands for message from {message.author.name}")
-            
-                # Handle direct messages to characters
-                user_id = message.author.id
-                logger.info(f"🔍 MESSAGE: Checking if user {user_id} has active session and message is not a command")
-                logger.info(f"📊 MESSAGE: User in active sessions: {user_id in self.active_sessions}")
-                logger.info(f"📊 MESSAGE: Message starts with prefix '{Config.BOT_PREFIX}': {message.content.startswith(Config.BOT_PREFIX)}")
-                logger.info(f"📊 MESSAGE: Is DM: {message.guild is None}")
-                
-                if (user_id in self.active_sessions and 
-                    not message.content.startswith(Config.BOT_PREFIX) and
-                    message.guild is None):  # Direct message only
-                
-                    session = self.active_sessions[user_id]
-                    
-                    # Validate session structure
-                    if not isinstance(session, dict) or "scenario" not in session:
-                        logger.error(f"Invalid session structure for user {user_id}")
-                        del self.active_sessions[user_id]
-                        await message.channel.send("❌ Your session is corrupted. Please start a new scenario.")
+                if current_char:
+                    # Validate user input
+                    is_valid, error_msg = self.validate_user_input(message.content)
+                    if not is_valid:
+                        await message.channel.send(f"❌ {error_msg}")
                         return
                     
-                    current_char = session.get("current_character")
-                    logger.info(f"🎭 MESSAGE: Current character for user {user_id}: {current_char.name if current_char else 'None'}")
+                    await message.channel.send(f"🤔 {current_char.name} is thinking...")
                 
-                    if current_char:
-                        # Validate user input
-                        is_valid, error_msg = self.validate_user_input(message.content)
-                        if not is_valid:
-                            await message.channel.send(f"❌ {error_msg}")
-                            return
-                        
-                        await message.channel.send(f"🤔 {current_char.name} is thinking...")
-                    
-                        # Add user message to conversation history
-                        session["conversation_history"].append({
-                            "role": "user",
-                            "content": message.content,
-                            "character": current_char.name
-                        })
-                    
-                        # Increment turn count
-                        session["turn_count"] += 1
-                    
-                        # Generate response with fallback
-                        response = await self._generate_character_response_with_fallback(
-                            message.content, current_char, session["conversation_history"]
-                        )
-                    
-                        # Add character response to conversation history
-                        session["conversation_history"].append({
-                            "role": "assistant",
-                            "content": response,
-                            "character": current_char.name
-                        })
-                    
-                        embed = discord.Embed(
-                            title=f"💬 {current_char.name}",
-                            description=response,
-                            color=0x0099ff
-                        )
-                    
-                        # Add turn counter to embed
-                        turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                        embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
-                    
-                        await message.channel.send(embed=embed)
-                    
-                        # Save session state
-                        self.save_sessions()
-                    
-                        # Check if conversation should end
-                        if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
-                            await self._end_conversation_with_feedback(message, user_id, session)
-                    
-            except Exception as e:
-                if not self.handle_error(e, "message handling"):
-                    if message.guild is None:  # DM
-                        await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
-                    return
-            
-                logger.error(f"Error in message handling: {e}")
+                    # Add user message to conversation history
+                    session["conversation_history"].append({
+                        "role": "user",
+                        "content": message.content,
+                        "character": current_char.name
+                    })
+                
+                    # Increment turn count
+                    session["turn_count"] += 1
+                
+                    # Generate response with fallback
+                    response = await self._generate_character_response_with_fallback(
+                        message.content, current_char, session["conversation_history"]
+                    )
+                
+                    # Add character response to conversation history
+                    session["conversation_history"].append({
+                        "role": "assistant",
+                        "content": response,
+                        "character": current_char.name
+                    })
+                
+                    embed = discord.Embed(
+                        title=f"💬 {current_char.name}",
+                        description=response,
+                        color=0x0099ff
+                    )
+                
+                    # Add turn counter to embed
+                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                
+                    await message.channel.send(embed=embed)
+                
+                    # Save session state
+                    self.save_sessions()
+                
+                    # Check if conversation should end
+                    if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
+                        await self._end_conversation_with_feedback(message, user_id, session)
+                
+        except Exception as e:
+            if not self.handle_error(e, "message handling"):
                 if message.guild is None:  # DM
-                    await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
+                    await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
+                return
+        
+            logger.error(f"Error in message handling: {e}")
+            if message.guild is None:  # DM
+                await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
     
     async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict]) -> str:
         """Generate character response with fallback mechanisms"""
