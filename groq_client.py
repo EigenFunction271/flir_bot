@@ -3,6 +3,7 @@ import aiohttp
 import json
 import logging
 from typing import Optional, Dict, Any, List
+from datetime import datetime, timedelta
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -16,10 +17,38 @@ class GroqClient:
         self.models = Config.GROQ_MODELS
         self.session = None
         
+        # Rate limiting
+        self.request_times = []
+        self.max_requests_per_minute = 30  # Conservative limit
+        self.rate_limit_window = 60  # seconds
+        
         if not self.api_key:
             raise ValueError("GROQ_API_KEY not found in environment variables")
         
         logger.info("✅ GroqClient initialized successfully")
+    
+    async def _check_rate_limit(self):
+        """Check and enforce rate limiting"""
+        now = datetime.now()
+        
+        # Remove old request times outside the window
+        self.request_times = [
+            req_time for req_time in self.request_times 
+            if (now - req_time).total_seconds() < self.rate_limit_window
+        ]
+        
+        # Check if we're at the limit
+        if len(self.request_times) >= self.max_requests_per_minute:
+            # Calculate wait time
+            oldest_request = min(self.request_times)
+            wait_time = self.rate_limit_window - (now - oldest_request).total_seconds()
+            
+            if wait_time > 0:
+                logger.warning(f"Rate limit reached, waiting {wait_time:.1f} seconds")
+                await asyncio.sleep(wait_time)
+        
+        # Record this request
+        self.request_times.append(now)
     
     async def generate_response(
         self, 
@@ -44,6 +73,9 @@ class GroqClient:
         """
         if model_type not in self.models:
             raise ValueError(f"Invalid model type: {model_type}. Must be 'fast' or 'quality'")
+        
+        # Check rate limit before making request
+        await self._check_rate_limit()
         
         model = self.models[model_type]
         temperature = temperature or Config.DEFAULT_TEMPERATURE
@@ -117,6 +149,9 @@ class GroqClient:
         """
         if model_type not in self.models:
             raise ValueError(f"Invalid model type: {model_type}. Must be 'fast' or 'quality'")
+        
+        # Check rate limit before making request
+        await self._check_rate_limit()
         
         model = self.models[model_type]
         temperature = temperature or Config.DEFAULT_TEMPERATURE

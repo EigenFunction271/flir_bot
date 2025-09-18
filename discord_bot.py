@@ -11,6 +11,7 @@ import traceback
 from datetime import datetime, timedelta
 import pickle
 from pathlib import Path
+import re
 
 from config import Config
 from characters import CharacterManager, CharacterPersona, ScenarioType
@@ -74,12 +75,35 @@ class FlirBot(commands.Bot):
         """Load active sessions from disk and validate them"""
         try:
             if self.session_file.exists():
+                # Check file size to avoid loading corrupted files
+                file_size = self.session_file.stat().st_size
+                if file_size == 0:
+                    logger.warning("Session file is empty, starting with empty sessions")
+                    self.active_sessions = {}
+                    return
+                
+                if file_size > 10 * 1024 * 1024:  # 10MB limit
+                    logger.error("Session file too large, starting with empty sessions")
+                    self.active_sessions = {}
+                    return
+                
                 with open(self.session_file, 'rb') as f:
                     self.active_sessions = pickle.load(f)
+                
+                # Validate session structure
+                if not isinstance(self.active_sessions, dict):
+                    logger.error("Invalid session file format, starting with empty sessions")
+                    self.active_sessions = {}
+                    return
                 
                 # Validate and clean up expired sessions
                 expired_sessions = []
                 for user_id, session in self.active_sessions.items():
+                    if not isinstance(session, dict):
+                        logger.warning(f"Invalid session format for user {user_id}, removing")
+                        expired_sessions.append(user_id)
+                        continue
+                    
                     if self._is_session_expired(session):
                         expired_sessions.append(user_id)
                 
@@ -94,6 +118,14 @@ class FlirBot(commands.Bot):
                 logger.info(f"✅ Loaded {len(self.active_sessions)} active sessions")
             else:
                 logger.info("No existing sessions found")
+        except (pickle.PickleError, EOFError, FileNotFoundError) as e:
+            logger.error(f"❌ Failed to load sessions (corrupted file): {e}")
+            # Backup corrupted file
+            if self.session_file.exists():
+                backup_file = self.session_file.with_suffix('.bak')
+                self.session_file.rename(backup_file)
+                logger.info(f"Backed up corrupted session file to {backup_file}")
+            self.active_sessions = {}
         except Exception as e:
             logger.error(f"❌ Failed to load sessions: {e}")
             self.active_sessions = {}
@@ -113,11 +145,30 @@ class FlirBot(commands.Bot):
     def save_sessions(self):
         """Save active sessions to disk"""
         try:
-            with open(self.session_file, 'wb') as f:
+            # Create backup before saving
+            if self.session_file.exists():
+                backup_file = self.session_file.with_suffix('.bak')
+                self.session_file.rename(backup_file)
+            
+            # Save to temporary file first, then rename (atomic operation)
+            temp_file = self.session_file.with_suffix('.tmp')
+            with open(temp_file, 'wb') as f:
                 pickle.dump(self.active_sessions, f)
+            
+            # Atomic rename
+            temp_file.rename(self.session_file)
             logger.debug(f"💾 Saved {len(self.active_sessions)} active sessions")
+            
         except Exception as e:
             logger.error(f"❌ Failed to save sessions: {e}")
+            # Try to restore backup if it exists
+            backup_file = self.session_file.with_suffix('.bak')
+            if backup_file.exists():
+                try:
+                    backup_file.rename(self.session_file)
+                    logger.info("Restored session backup after save failure")
+                except Exception as restore_error:
+                    logger.error(f"Failed to restore backup: {restore_error}")
     
     def check_error_rate(self) -> bool:
         """Check if error rate is too high"""
@@ -144,6 +195,35 @@ class FlirBot(commands.Bot):
             logger.critical("🚨 Bot entering safe mode due to high error rate")
             return False
         return True
+    
+    def validate_user_input(self, message: str) -> tuple[bool, str]:
+        """
+        Validate user input for safety and length
+        
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        if not message or not message.strip():
+            return False, "Message cannot be empty"
+        
+        if len(message) > 2000:  # Discord message limit
+            return False, "Message is too long (max 2000 characters)"
+        
+        if len(message.strip()) < 1:
+            return False, "Message must contain at least one character"
+        
+        # Basic content filtering
+        dangerous_patterns = [
+            r'<script.*?>',  # Script tags
+            r'javascript:',  # JavaScript URLs
+            r'data:text/html',  # Data URLs
+        ]
+        
+        for pattern in dangerous_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return False, "Message contains potentially unsafe content"
+        
+        return True, ""
     
     async def _end_conversation_with_feedback(self, ctx_or_message, user_id: int, session: Dict):
         """End conversation and generate feedback with error boundaries"""
@@ -314,6 +394,7 @@ Keep it constructive and specific."""
     
     def load_commands(self):
         """Load all bot commands"""
+        logger.info("🔧 Loading bot commands...")
         
         @self.command(name="help", aliases=["h"])
         async def help_command(ctx):
@@ -366,6 +447,96 @@ Keep it constructive and specific."""
             """Check bot latency"""
             latency = round(self.latency * 1000)
             await ctx.send(f"🏓 Pong! Latency: {latency}ms")
+        
+        @self.command(name="debug")
+        async def debug_info(ctx):
+            """Show debug information about the bot"""
+            embed = discord.Embed(
+                title="🔧 Debug Information",
+                color=0x0099ff
+            )
+            
+            # List all registered commands
+            commands = [cmd.name for cmd in self.commands]
+            embed.add_field(
+                name="📋 Registered Commands",
+                value=", ".join(commands) if commands else "No commands found",
+                inline=False
+            )
+            
+            # Bot prefix
+            embed.add_field(
+                name="🔤 Bot Prefix",
+                value=f"`{Config.BOT_PREFIX}`",
+                inline=True
+            )
+            
+            # Active sessions count
+            embed.add_field(
+                name="👥 Active Sessions",
+                value=str(len(self.active_sessions)),
+                inline=True
+            )
+            
+            # Error count
+            embed.add_field(
+                name="❌ Error Count",
+                value=str(self.error_count),
+                inline=True
+            )
+            
+            await ctx.send(embed=embed)
+        
+        @self.command(name="test-message")
+        async def test_message_handling(ctx):
+            """Test message handling and session state"""
+            user_id = ctx.author.id
+            
+            embed = discord.Embed(
+                title="🧪 Message Handling Test",
+                color=0x0099ff
+            )
+            
+            # Check if user has active session
+            has_session = user_id in self.active_sessions
+            embed.add_field(
+                name="📊 Has Active Session",
+                value="✅ Yes" if has_session else "❌ No",
+                inline=True
+            )
+            
+            if has_session:
+                session = self.active_sessions[user_id]
+                current_char = session.get("current_character")
+                embed.add_field(
+                    name="🎭 Current Character",
+                    value=current_char.name if current_char else "None",
+                    inline=True
+                )
+                embed.add_field(
+                    name="🎬 Scenario",
+                    value=session.get("scenario", {}).get("name", "Unknown"),
+                    inline=True
+                )
+                embed.add_field(
+                    name="🔄 Turn Count",
+                    value=str(session.get("turn_count", 0)),
+                    inline=True
+                )
+            
+            embed.add_field(
+                name="🔤 Bot Prefix",
+                value=f"`{Config.BOT_PREFIX}`",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="📨 Message Channel",
+                value="DM" if ctx.guild is None else f"#{ctx.channel.name}",
+                inline=True
+            )
+            
+            await ctx.send(embed=embed)
         
         @self.command(name="test")
         async def test_connections(ctx):
@@ -624,31 +795,48 @@ Keep it constructive and specific."""
             """Talk to a character with error boundaries"""
             try:
                 user_id = ctx.author.id
+                logger.info(f"🔍 TALK COMMAND: User {user_id} ({ctx.author.name}) called !talk with character='{character_name}', message='{message}'")
                 
                 # Check if user has an active session
                 if user_id not in self.active_sessions:
+                    logger.warning(f"⚠️ TALK COMMAND: User {user_id} has no active session")
                     await ctx.send("❌ You don't have an active session. Use `!start <scenario_id>` to begin a scenario.")
                     return
                 
                 session = self.active_sessions[user_id]
+                logger.info(f"📊 TALK COMMAND: User {user_id} has active session with scenario: {session.get('scenario', {}).get('name', 'Unknown')}")
                 
                 # Find character
                 character = None
+                available_char_names = []
                 for char in session["characters"]:
+                    available_char_names.append(char.name)
                     if char.name.lower() == character_name.lower():
                         character = char
                         break
                 
+                logger.info(f"🎭 TALK COMMAND: Available characters: {available_char_names}, looking for: '{character_name}'")
+                
                 if not character:
-                    available_chars = ", ".join([char.name for char in session["characters"]])
+                    available_chars = ", ".join(available_char_names)
+                    logger.warning(f"⚠️ TALK COMMAND: Character '{character_name}' not found. Available: {available_chars}")
                     await ctx.send(f"❌ Character '{character_name}' not available in this scenario. Available: {available_chars}")
                     return
+                
+                logger.info(f"✅ TALK COMMAND: Found character '{character.name}' for user {user_id}")
                 
                 # If no message provided, just set current character
                 if not message:
                     session["current_character"] = character
                     self.save_sessions()
+                    logger.info(f"🎯 TALK COMMAND: Set current character to '{character.name}' for user {user_id}")
                     await ctx.send(f"👤 Now talking to **{character.name}**. Send your message to continue the conversation.")
+                    return
+                
+                # Validate user input
+                is_valid, error_msg = self.validate_user_input(message)
+                if not is_valid:
+                    await ctx.send(f"❌ {error_msg}")
                     return
                 
                 # Process the message with error boundaries
@@ -735,106 +923,132 @@ Keep it constructive and specific."""
     def _generate_basic_character_response(self, character: CharacterPersona, message: str) -> str:
         """Generate basic character response when all AI services fail"""
         return f"*{character.name} is having trouble responding right now. They seem to be thinking about what you said: '{message[:50]}...'*"
+    
+    @self.command(name="status")
+    async def session_status(ctx):
+        """Check current session status"""
+        user_id = ctx.author.id
         
-        @self.command(name="status")
-        async def session_status(ctx):
-            """Check current session status"""
-            user_id = ctx.author.id
+        if user_id not in self.active_sessions:
+            await ctx.send("❌ You don't have an active session.")
+            return
+        
+        session = self.active_sessions[user_id]
+        
+        # Validate session structure
+        if not isinstance(session, dict) or "scenario" not in session:
+            logger.error(f"Invalid session structure for user {user_id}")
+            del self.active_sessions[user_id]
+            await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
+            return
+        
+        scenario = session["scenario"]
+        current_char = session.get("current_character")
+        
+        embed = discord.Embed(
+            title="📊 Session Status",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="🎬 Current Scenario",
+            value=scenario.name,
+            inline=True
+        )
+        
+        embed.add_field(
+            name="👤 Current Character",
+            value=current_char.name if current_char else "None selected",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🔄 Turn Count",
+            value=f"{session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="👥 Available Characters",
+            value=", ".join([char.name for char in session["characters"]]),
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+    
+    @self.command(name="history", aliases=["chat"])
+    async def conversation_history(ctx):
+        """View conversation history for current session"""
+        user_id = ctx.author.id
+        
+        if user_id not in self.active_sessions:
+            await ctx.send("❌ You don't have an active session.")
+            return
+        
+        session = self.active_sessions[user_id]
+        
+        # Validate session structure
+        if not isinstance(session, dict) or "scenario" not in session:
+            logger.error(f"Invalid session structure for user {user_id}")
+            del self.active_sessions[user_id]
+            await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
+            return
+        
+        history = session.get("conversation_history", [])
+        
+        if not history:
+            await ctx.send("📝 No conversation history yet. Start talking to a character!")
+            return
+        
+        embed = discord.Embed(
+            title="📝 Conversation History",
+            description=f"**Scenario:** {session['scenario'].name}",
+            color=0x0099ff
+        )
+        
+        # Show last 10 messages to avoid embed limits
+        recent_history = history[-10:] if len(history) > 10 else history
+        
+        for i, msg in enumerate(recent_history, 1):
+            role_emoji = "👤" if msg["role"] == "user" else "🤖"
+            character_name = msg.get("character", "Unknown")
             
-            if user_id not in self.active_sessions:
-                await ctx.send("❌ You don't have an active session.")
-                return
-            
-            session = self.active_sessions[user_id]
-            scenario = session["scenario"]
-            current_char = session.get("current_character")
-            
-            embed = discord.Embed(
-                title="📊 Session Status",
-                color=0x00ff00
-            )
+            # Truncate long messages
+            content = msg["content"]
+            if len(content) > 200:
+                content = content[:200] + "..."
             
             embed.add_field(
-                name="🎬 Current Scenario",
-                value=scenario.name,
-                inline=True
-            )
-            
-            embed.add_field(
-                name="👤 Current Character",
-                value=current_char.name if current_char else "None selected",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="🔄 Turn Count",
-                value=f"{session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="👥 Available Characters",
-                value=", ".join([char.name for char in session["characters"]]),
+                name=f"{role_emoji} {character_name if msg['role'] == 'assistant' else 'You'}",
+                value=content,
                 inline=False
             )
-            
-            await ctx.send(embed=embed)
         
-        @self.command(name="history", aliases=["chat"])
-        async def conversation_history(ctx):
-            """View conversation history for current session"""
-            user_id = ctx.author.id
-            
-            if user_id not in self.active_sessions:
-                await ctx.send("❌ You don't have an active session.")
-                return
-            
-            session = self.active_sessions[user_id]
-            history = session.get("conversation_history", [])
-            
-            if not history:
-                await ctx.send("📝 No conversation history yet. Start talking to a character!")
-                return
-            
-            embed = discord.Embed(
-                title="📝 Conversation History",
-                description=f"**Scenario:** {session['scenario'].name}",
-                color=0x0099ff
-            )
-            
-            # Show last 10 messages to avoid embed limits
-            recent_history = history[-10:] if len(history) > 10 else history
-            
-            for i, msg in enumerate(recent_history, 1):
-                role_emoji = "👤" if msg["role"] == "user" else "🤖"
-                character_name = msg.get("character", "Unknown")
-                
-                # Truncate long messages
-                content = msg["content"]
-                if len(content) > 200:
-                    content = content[:200] + "..."
-                
-                embed.add_field(
-                    name=f"{role_emoji} {character_name if msg['role'] == 'assistant' else 'You'}",
-                    value=content,
-                    inline=False
-                )
-            
-            if len(history) > 10:
-                embed.set_footer(text=f"Showing last 10 of {len(history)} messages")
-            
-            await ctx.send(embed=embed)
+        if len(history) > 10:
+            embed.set_footer(text=f"Showing last 10 of {len(history)} messages")
         
+        await ctx.send(embed=embed)
+    
         @self.command(name="end")
         async def end_session(ctx):
             """End current session"""
             user_id = ctx.author.id
+            logger.info(f"🔍 END COMMAND: User {user_id} ({ctx.author.name}) called !end")
             
             if user_id not in self.active_sessions:
+                logger.warning(f"⚠️ END COMMAND: User {user_id} has no active session to end")
                 await ctx.send("❌ You don't have an active session to end.")
                 return
             
             session = self.active_sessions[user_id]
+            
+            # Validate session structure
+            if not isinstance(session, dict) or "scenario" not in session:
+                logger.error(f"Invalid session structure for user {user_id}")
+                del self.active_sessions[user_id]
+                await ctx.send("❌ Your session is corrupted. Please start a new scenario.")
+                return
+            
             scenario_name = session["scenario"].name
             
             # Clean up session
@@ -848,80 +1062,105 @@ Keep it constructive and specific."""
             )
             
             await ctx.send(embed=embed)
+        
+        logger.info("✅ All bot commands loaded successfully")
     
     # Handle direct messages to characters when in a session
-        @self.event
-        async def on_message(self, message):
-            try:
-                # Ignore bot messages
-                if message.author.bot:
+    @self.event
+    async def on_message(self, message):
+        try:
+            # Ignore bot messages
+            if message.author.bot:
+                return
+            
+            logger.info(f"📨 MESSAGE: Received message from {message.author.name} ({message.author.id}): '{message.content[:100]}...' in {message.guild.name if message.guild else 'DM'}")
+        
+            # Process commands first
+            await self.process_commands(message)
+            logger.info(f"✅ MESSAGE: Processed commands for message from {message.author.name}")
+        
+            # Handle direct messages to characters
+            user_id = message.author.id
+            logger.info(f"🔍 MESSAGE: Checking if user {user_id} has active session and message is not a command")
+            logger.info(f"📊 MESSAGE: User in active sessions: {user_id in self.active_sessions}")
+            logger.info(f"📊 MESSAGE: Message starts with prefix '{Config.BOT_PREFIX}': {message.content.startswith(Config.BOT_PREFIX)}")
+            logger.info(f"📊 MESSAGE: Is DM: {message.guild is None}")
+            
+            if (user_id in self.active_sessions and 
+                not message.content.startswith(Config.BOT_PREFIX) and
+                message.guild is None):  # Direct message only
+            
+                session = self.active_sessions[user_id]
+                
+                # Validate session structure
+                if not isinstance(session, dict) or "scenario" not in session:
+                    logger.error(f"Invalid session structure for user {user_id}")
+                    del self.active_sessions[user_id]
+                    await message.channel.send("❌ Your session is corrupted. Please start a new scenario.")
                     return
-            
-                # Process commands first
-                await self.process_commands(message)
-            
-                # Handle direct messages to characters
-                user_id = message.author.id
-                if (user_id in self.active_sessions and 
-                    not message.content.startswith(Config.BOT_PREFIX) and
-                    message.guild is None):  # Direct message only
                 
-                    session = self.active_sessions[user_id]
-                    current_char = session.get("current_character")
+                current_char = session.get("current_character")
+                logger.info(f"🎭 MESSAGE: Current character for user {user_id}: {current_char.name if current_char else 'None'}")
+            
+                if current_char:
+                    # Validate user input
+                    is_valid, error_msg = self.validate_user_input(message.content)
+                    if not is_valid:
+                        await message.channel.send(f"❌ {error_msg}")
+                        return
+                    
+                    await message.channel.send(f"🤔 {current_char.name} is thinking...")
                 
-                    if current_char:
-                        await message.channel.send(f"🤔 {current_char.name} is thinking...")
-                    
-                        # Add user message to conversation history
-                        session["conversation_history"].append({
-                            "role": "user",
-                            "content": message.content,
-                          "character": current_char.name
-                        })
-                    
-                        # Increment turn count
-                        session["turn_count"] += 1
-                    
-                        # Generate response with fallback
-                        response = await self._generate_character_response_with_fallback(
-                            message.content, current_char, session["conversation_history"]
-                        )
-                    
-                        # Add character response to conversation history
-                        session["conversation_history"].append({
-                            "role": "assistant",
-                            "content": response,
-                            "character": current_char.name
-                        })
-                    
-                        embed = discord.Embed(
-                            title=f"💬 {current_char.name}",
-                            description=response,
-                            color=0x0099ff
-                        )
-                    
+                    # Add user message to conversation history
+                    session["conversation_history"].append({
+                        "role": "user",
+                        "content": message.content,
+                        "character": current_char.name
+                    })
+                
+                    # Increment turn count
+                    session["turn_count"] += 1
+                
+                    # Generate response with fallback
+                    response = await self._generate_character_response_with_fallback(
+                        message.content, current_char, session["conversation_history"]
+                    )
+                
+                    # Add character response to conversation history
+                    session["conversation_history"].append({
+                        "role": "assistant",
+                        "content": response,
+                        "character": current_char.name
+                    })
+                
+                    embed = discord.Embed(
+                        title=f"💬 {current_char.name}",
+                        description=response,
+                        color=0x0099ff
+                    )
+                
                     # Add turn counter to embed
-                        turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                        embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
-                    
-                        await message.channel.send(embed=embed)
-                    
+                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                
+                    await message.channel.send(embed=embed)
+                
                     # Save session state
-                        self.save_sessions()
-                    
-                        # Check if conversation should end
-                        if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
-                            await self._end_conversation_with_feedback(message, user_id, session)
-                    
-            except Exception as e:
-                if not self.handle_error(e, "message handling"):
-                    if message.guild is None:  # DM
-                        await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
-                    return
-            
-                logger.error(f"Error in message handling: {e}")
+                    self.save_sessions()
+                
+                    # Check if conversation should end
+                    if session["turn_count"] >= Config.MAX_CONVERSATION_TURNS:
+                        await self._end_conversation_with_feedback(message, user_id, session)
+                
+        except Exception as e:
+            if not self.handle_error(e, "message handling"):
                 if message.guild is None:  # DM
-                    await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
+                    await message.channel.send("🚨 Bot is experiencing issues. Please try again later.")
+                return
+        
+            logger.error(f"Error in message handling: {e}")
+            if message.guild is None:  # DM
+                await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
 
 async def health_check(request):
     """Health check endpoint for Render with error boundaries"""
@@ -974,6 +1213,8 @@ async def main():
         # Create and run bot
         bot = FlirBot()
         logger.info("✅ Bot initialized successfully")
+        logger.info(f"📋 Bot has {len(bot.commands)} commands registered")
+        logger.info(f"🔤 Bot prefix: '{Config.BOT_PREFIX}'")
         
         # Add periodic session saving and cleanup
         async def save_sessions_periodically():

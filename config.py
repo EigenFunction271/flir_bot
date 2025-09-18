@@ -7,7 +7,16 @@ load_dotenv()
 class Config:
     # Discord Configuration
     DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-    DISCORD_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", 0))
+    
+    # Safely parse DISCORD_GUILD_ID with error handling
+    _guild_id_str = os.getenv("DISCORD_GUILD_ID", "0")
+    try:
+        DISCORD_GUILD_ID = int(_guild_id_str) if _guild_id_str else 0
+    except ValueError:
+        DISCORD_GUILD_ID = 0
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Invalid DISCORD_GUILD_ID '{_guild_id_str}', using default value 0")
     
     # Groq Configuration
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
