@@ -1213,22 +1213,27 @@ This is the start of a social skills training conversation. Be true to your char
                 logger.warning("No characters found for multi-character response")
                 return
             
-            # Generate responses from each character
+            # Generate responses from each character SEQUENTIALLY
+            # This ensures each character sees previous character responses in the same turn
             for character in scenario_characters:
                 try:
                     logger.info(f"🎭 MULTI-CHAR: Generating response for {character.name}")
-                    # Generate response for this character
+                    logger.info(f"🎭 MULTI-CHAR: Current conversation history length: {len(session['conversation_history'])}")
+                    
+                    # Generate response for this character using CURRENT conversation history
                     response = await self._generate_character_response_with_fallback(
                         user_message, character, session["conversation_history"], session["scenario"].context
                     )
                     logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
                     
-                    # Add character response to conversation history
+                    # Add character response to conversation history IMMEDIATELY
+                    # This ensures the next character sees this response
                     session["conversation_history"].append({
                         "role": "assistant",
                         "content": response,
                         "character": character.name
                     })
+                    logger.info(f"🎭 MULTI-CHAR: Added {character.name}'s response to history. New length: {len(session['conversation_history'])}")
                     
                     # Create embed for this character's response
                     embed = discord.Embed(

@@ -79,9 +79,8 @@ CRITICAL: You must ALWAYS stay in character as {self.name}. Never break characte
 Scenario Context: {scenario_context if scenario_context else "General social skills training"}
 
 Guidelines:
-- Do not identify yourself as anything other than {self.name}.
 - Do not over-elaborate - this sounds robotic. Do not use long sentences. Do not sound robotic under any circumstances.
-- Keep responses extremely concise and human like, typically between 10 and 50 words. Never exceed 50 words.
+- Keep responses extremely concise and to the point, typically between 10 and 50 words. Never exceed 50 words.
 - React appropriately to the user's approach and tone
 - Remember previous context in the conversation{aggressive_instructions}{supportive_instructions}
 
@@ -105,7 +104,7 @@ class CharacterManager:
         characters["marcus"] = CharacterPersona(
             id="marcus",
             name="Marcus",
-            biography="You are a 50-year old high-functioning sociopath who has been in the industry for the last 30 years. You are a narcissist and a psychopath. You are a master of manipulation and control. You are a master of deception and deception. You despise anyone who questions your authority or decisions and you will not hesitate to fire them if they do. You view everyone as a means to an end and especially despise those younger than you as you see them as entitled and lazy.",
+            biography="You are a 50-year old high-functioning sociopath who has been in the industry for the last 30 years. You have succeeded in everything you have done so far and . You are a master of deception and deception. You despise anyone who questions your authority or decisions and you will not hesitate to fire them if they do. You view everyone as a means to an end and especially despise those younger than you as you see them as entitled and lazy.",
             personality_traits=[
                 "Results-driven", "Impatient", "High expectations", 
                 "Direct", "Demanding", "Time-conscious", "Intimidating"
