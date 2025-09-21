@@ -1154,17 +1154,19 @@ This is the start of a social skills training conversation. Be true to your char
             if message.guild is None:  # DM
                 await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
     
-    async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict], scenario_context: str = None) -> str:
+    async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict], scenario_context: str = None, character_role_context: str = None) -> str:
         """Generate character response with fallback mechanisms"""
         try:
-            # Generate character-specific system prompt
-            system_prompt = character.generate_system_prompt(scenario_context)
+            # Generate character-specific system prompt with role context
+            system_prompt = character.generate_system_prompt(scenario_context, character_role_context)
             logger.info(f"🎭 SYSTEM: Generated system prompt for {character.name}: {system_prompt[:100]}...")
+            if character_role_context:
+                logger.info(f"🎭 ROLE: Character role context for {character.name}: {character_role_context[:100]}...")
             
             # Try Groq first with character-specific memory
             response = await self.groq_client.generate_response_with_history(
                 user_message=message,
-                system_prompt=character.generate_system_prompt(scenario_context),
+                system_prompt=system_prompt,
                 conversation_history=conversation_history,
                 model_type="fast",
                 current_character_name=character.name
@@ -1177,7 +1179,7 @@ This is the start of a social skills training conversation. Be true to your char
             try:
                 response = await self.groq_client.generate_response(
                     user_message=message,
-                    system_prompt=character.generate_system_prompt(scenario_context),
+                    system_prompt=system_prompt,
                     model_type="fast"
                 )
                 return response
@@ -1196,10 +1198,12 @@ This is the start of a social skills training conversation. Be true to your char
         try:
             logger.info(f"🎭 MULTI-CHAR: Starting multi-character response generation")
             logger.info(f"🎭 MULTI-CHAR: Scenario characters: {session['scenario'].characters}")
+            logger.info(f"🎭 MULTI-CHAR: Current conversation history length: {len(session['conversation_history'])}")
             
             # Get all characters in the scenario except coach
             scenario_characters = []
             for char_id in session["scenario"].characters:
+                logger.info(f"🎭 MULTI-CHAR: Processing character ID: {char_id}")
                 if char_id.lower() != "kai":  # Exclude coach
                     character = self.character_manager.get_character(char_id)
                     if character:
@@ -1207,6 +1211,8 @@ This is the start of a social skills training conversation. Be true to your char
                         logger.info(f"🎭 MULTI-CHAR: Added character: {character.name}")
                     else:
                         logger.warning(f"🎭 MULTI-CHAR: Character not found: {char_id}")
+                else:
+                    logger.info(f"🎭 MULTI-CHAR: Excluded coach character: {char_id}")
             
             logger.info(f"🎭 MULTI-CHAR: Found {len(scenario_characters)} characters to respond")
             
@@ -1221,9 +1227,12 @@ This is the start of a social skills training conversation. Be true to your char
                     logger.info(f"🎭 MULTI-CHAR: Generating response for {character.name}")
                     logger.info(f"🎭 MULTI-CHAR: Current conversation history length: {len(session['conversation_history'])}")
                     
+                    # Get character-specific role context from scenario
+                    character_role_context = session["scenario"].get_character_role_context(character.id)
+                    
                     # Generate response for this character using CURRENT conversation history
                     response = await self._generate_character_response_with_fallback(
-                        user_message, character, session["conversation_history"], session["scenario"].context
+                        user_message, character, session["conversation_history"], session["scenario"].context, character_role_context
                     )
                     logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
                     
@@ -1265,8 +1274,9 @@ This is the start of a social skills training conversation. Be true to your char
             # Fallback to single character response
             current_char = session.get("current_character")
             if current_char:
+                character_role_context = session["scenario"].get_character_role_context(current_char.id)
                 response = await self._generate_character_response_with_fallback(
-                    user_message, current_char, session["conversation_history"], session["scenario"].context
+                    user_message, current_char, session["conversation_history"], session["scenario"].context, character_role_context
                 )
                 
                 session["conversation_history"].append({

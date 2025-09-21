@@ -36,7 +36,7 @@ class CharacterPersona:
             # Default biography based on personality traits and reference
             self.biography = f"You are {self.name}, a character with {', '.join(self.personality_traits[:3])} traits. {f'You act similar to {self.reference}.' if self.reference else ''}"
     
-    def generate_system_prompt(self, scenario_context: str = None) -> str:
+    def generate_system_prompt(self, scenario_context: str = None, character_role_context: str = None) -> str:
         """Generate the system prompt for this character"""
         reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}. NEVER break character or identify yourself as anything other than {self.name}." if self.reference else ""
         
@@ -77,6 +77,10 @@ class CharacterPersona:
 CRITICAL: You must ALWAYS stay in character as {self.name}. Never break character or identify yourself as anything other than {self.name}.
 
 Scenario Context: {scenario_context if scenario_context else "General social skills training"}
+
+Character Role in This Scenario: {character_role_context if character_role_context else "General character interaction"}
+
+IMPORTANT: Pay close attention to both the scenario context and your specific character role. Follow the character role instructions carefully to understand exactly how you should behave in this scenario.
 
 Guidelines:
 - Do not over-elaborate - this sounds robotic. Do not use long sentences. Do not sound robotic under any circumstances.

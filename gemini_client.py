@@ -72,10 +72,11 @@ class GeminiClient:
         conversation_text = self._format_conversation_history(conversation_history)
         
         # Create feedback prompt
-        prompt = f"""You are an expert social skills coach analyzing a conversation between a user and an AI character in a social skills training scenario.
+        prompt = f"""You are an expert social skills coach analyzing a conversation between a user and a set of AI characters in a social skills training scenario.
 
 SCENARIO: {scenario_name}
 CHARACTER: {character_name}
+CHARACTERS: {', '.join(characters)}
 OBJECTIVES: {', '.join(scenario_objectives)}
 
 CONVERSATION HISTORY:
@@ -90,12 +91,13 @@ Please provide constructive feedback on the user's social skills performance. Fo
 5. **Objective Achievement**: How well did they work toward the scenario objectives?
 
 Format your feedback as:
+- **Rating**: [1-10] - 10 is completely successful or very minor flaws, 1 is completely failed or repeated major flaws
 - **Strengths**: [List 2-3 strengths with examples]
 - **Areas for Improvement**: [List 2-3 areas with specific suggestions]
 - **Key Takeaways**: [2-3 actionable tips for future conversations]
 - **Overall Assessment**: [Brief summary of performance]
 
-Keep the feedback constructive, specific, and encouraging. Aim for 200-300 words total."""
+Keep the feedback constructive, specific, and encouraging. Aim for 300-400 words total."""
 
         try:
             # Check rate limit before making request

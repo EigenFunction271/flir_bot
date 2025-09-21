@@ -128,7 +128,9 @@ class GroqClient:
         """Filter conversation history to give character-specific context and self-awareness"""
         relevant_messages = []
         
-        for msg in conversation_history:
+        logger.info(f"🎭 MEMORY: Processing {len(conversation_history)} messages for {current_character_name}")
+        for i, msg in enumerate(conversation_history):
+            logger.info(f"🎭 MEMORY: Message {i}: role={msg.get('role')}, character={msg.get('character', 'N/A')}, content={msg.get('content', '')[:50]}...")
             if msg["role"] == "user":
                 # User messages are relevant to all characters
                 relevant_messages.append(msg)
