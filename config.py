@@ -37,7 +37,7 @@ class Config:
     
     # Character Configuration
     MAX_RESPONSE_LENGTH = 500
-    DEFAULT_TEMPERATURE = 0.8
+    DEFAULT_TEMPERATURE = 0.6
     
     # Conversation Configuration
     MAX_CONVERSATION_TURNS = 3

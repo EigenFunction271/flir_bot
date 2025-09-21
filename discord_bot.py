@@ -1161,18 +1161,19 @@ This is the start of a social skills training conversation. Be true to your char
             system_prompt = character.generate_system_prompt(scenario_context)
             logger.info(f"🎭 SYSTEM: Generated system prompt for {character.name}: {system_prompt[:100]}...")
             
-            # Try Groq first
+            # Try Groq first with character-specific memory
             response = await self.groq_client.generate_response_with_history(
                 user_message=message,
                 system_prompt=character.generate_system_prompt(scenario_context),
                 conversation_history=conversation_history,
-                model_type="fast"
+                model_type="fast",
+                current_character_name=character.name
             )
             return response
         except Exception as e:
             logger.warning(f"Groq response generation failed: {e}")
             
-            # Fallback to basic response
+            # Fallback to basic response (without history)
             try:
                 response = await self.groq_client.generate_response(
                     user_message=message,

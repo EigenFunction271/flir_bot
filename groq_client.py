@@ -124,6 +124,33 @@ class GroqClient:
             logger.error(f"Error calling Groq API: {str(e)}")
             raise Exception(f"Error calling Groq API: {str(e)}")
     
+    def _get_character_relevant_history(self, conversation_history: List[Dict], current_character_name: str) -> List[Dict]:
+        """Filter conversation history to give character-specific context and self-awareness"""
+        relevant_messages = []
+        
+        for msg in conversation_history:
+            if msg["role"] == "user":
+                # User messages are relevant to all characters
+                relevant_messages.append(msg)
+            elif msg["role"] == "assistant":
+                character_name = msg.get("character", "Unknown")
+                content = msg.get("content", "")
+                
+                if character_name == current_character_name:
+                    # This character's own previous response
+                    relevant_messages.append({
+                        "role": "assistant",
+                        "content": f"You said: {content}"
+                    })
+                else:
+                    # Another character's response
+                    relevant_messages.append({
+                        "role": "assistant",
+                        "content": f"{character_name} said: {content}"
+                    })
+        
+        return relevant_messages
+
     async def generate_response_with_history(
         self, 
         user_message: str, 
@@ -131,7 +158,8 @@ class GroqClient:
         conversation_history: List[Dict],
         model_type: str = "fast",
         temperature: float = None,
-        max_tokens: int = None
+        max_tokens: int = None,
+        current_character_name: str = None
     ) -> str:
         """
         Generate a response using Groq GPT OSS with conversation history
@@ -160,8 +188,17 @@ class GroqClient:
         # Build messages array with system prompt and conversation history
         messages = [{"role": "system", "content": system_prompt}]
         
+        # Filter conversation history for character-specific context and self-awareness
+        if current_character_name:
+            character_relevant_history = self._get_character_relevant_history(conversation_history, current_character_name)
+            logger.info(f"🎭 MEMORY: Filtered history for {current_character_name}: {len(character_relevant_history)} messages")
+        else:
+            # Fallback to generic history if no character name provided
+            character_relevant_history = conversation_history
+            logger.info("🎭 MEMORY: Using generic conversation history (no character specified)")
+        
         # Add conversation history (limit to last 10 messages to avoid token limits)
-        recent_history = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
+        recent_history = character_relevant_history[-10:] if len(character_relevant_history) > 10 else character_relevant_history
         for msg in recent_history:
             messages.append({
                 "role": msg["role"],
