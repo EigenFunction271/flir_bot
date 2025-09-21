@@ -12,11 +12,29 @@ class CharacterPersona:
     """Represents a character persona with all necessary attributes"""
     id: str
     name: str
+    biography: str
     personality_traits: List[str]
     communication_style: str
     scenario_affinity: List[ScenarioType]
     reference: Optional[str] = None
     voice_id: Optional[str] = None  # For future TTS integration
+    
+    def __setstate__(self, state):
+        """Handle backward compatibility when unpickling objects without biography field"""
+        # Set all attributes from the state
+        for key, value in state.items():
+            setattr(self, key, value)
+        
+        # Handle missing biography field for backward compatibility
+        if not hasattr(self, 'biography') or not self.biography:
+            # Generate a default biography based on existing attributes
+            self.biography = f"You are {self.name}, a character with {', '.join(self.personality_traits[:3])} traits. {f'You act similar to {self.reference}.' if self.reference else ''}"
+    
+    def __post_init__(self):
+        """Handle backward compatibility for missing biography field"""
+        if not hasattr(self, 'biography') or not self.biography:
+            # Default biography based on personality traits and reference
+            self.biography = f"You are {self.name}, a character with {', '.join(self.personality_traits[:3])} traits. {f'You act similar to {self.reference}.' if self.reference else ''}"
     
     def generate_system_prompt(self, scenario_context: str = None) -> str:
         """Generate the system prompt for this character"""
@@ -51,10 +69,8 @@ class CharacterPersona:
         supportive_instructions = ""
         if is_aggressive_scenario and not is_naturally_aggressive:
             supportive_instructions = """
-- Be supportive and understanding despite the challenging situation
-- Try to mediate and find solutions
-- Show empathy for the user's position
-- Provide emotional support while maintaining your character's perspective"""
+- Act as your character would in this situation
+"""
         
         return f"""You are {self.name}. You are NOT ChatGPT, you are NOT an AI assistant, you are NOT a bot. You are {self.name}, who acts similar to {self.reference}, a real person in this scenario.{reference_text}
 
