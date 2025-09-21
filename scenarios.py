@@ -46,13 +46,7 @@ class ScenarioManager:
 
 Sarah, your supportive coworker, is also in the meeting and can provide backup. Coach Kai is available to guide you through the conversation.
 
-The project involves:
-- Building a new user authentication system
-- Integrating with 3 external APIs
-- Writing comprehensive tests
-- Creating documentation
-
-You know this timeline is unrealistic and could compromise code quality and team morale.""",
+You know this timeline is unrealistic and could compromise code quality and team morale. Importantly, some of the requirements depend on other departments and cannot be completed in the given time frame. However, Marcus and Sarah are unaware of this. Marcus is also under pressure from the CEO to complete the project on time.""",
             difficulty="intermediate"
         )
         
@@ -86,7 +80,7 @@ You want to address these issues while being supportive and helping Sarah get ba
             name="First Date Conversation",
             description="Practice navigating a first date conversation, showing interest while being authentic and handling awkward moments gracefully.",
             scenario_type=ScenarioType.DATING,
-            characters=["alex", "jordan", "kai"],
+            characters=["alex", "kai"],
             objectives=[
                 "Show genuine interest in your date",
                 "Handle awkward moments gracefully",
@@ -95,7 +89,7 @@ You want to address these issues while being supportive and helping Sarah get ba
             ],
             context="""You're on a first date with Alex at a cozy coffee shop. You met through a mutual friend and have been texting for about a week. This is your first in-person meeting.
 
-Alex seems interesting and attractive, but you're feeling a bit nervous. Your friend Jordan is available via text for advice, and Coach Kai can provide real-time guidance.
+Alex seems interesting and attractive, but you're feeling a bit nervous. Coach Kai can provide real-time guidance.
 
 The date has been going well so far - you've been talking for about 30 minutes. Alex just asked about your career goals, and you want to respond in a way that's engaging but not overwhelming.""",
             difficulty="beginner"
@@ -106,7 +100,7 @@ The date has been going well so far - you've been talking for about 30 minutes. 
             name="Defining the Relationship",
             description="Practice having 'the talk' about where your relationship is heading and what you both want.",
             scenario_type=ScenarioType.DATING,
-            characters=["alex", "jordan", "kai"],
+            characters=["alex", "kai"],
             objectives=[
                 "Express your feelings clearly",
                 "Listen to your partner's perspective",
@@ -116,8 +110,9 @@ The date has been going well so far - you've been talking for about 30 minutes. 
             context="""You've been dating Alex for about 3 months now. Things have been going well, but you're starting to feel like you need to have a conversation about where this is heading.
 
 You're both in your late 20s and have been exclusive for about 6 weeks. You're starting to develop deeper feelings but aren't sure if Alex feels the same way. You want to know if you're both looking for something serious or if this is more casual.
+What you don't know is that Alex is actually a player and is just using you for sex. He's not looking for anything serious. 
 
-Your friend Jordan is available for advice, and Coach Kai can help guide the conversation.""",
+Coach Kai can help guide the conversation.""",
             difficulty="intermediate"
         )
         
