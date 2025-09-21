@@ -307,7 +307,9 @@ class FlirBot(commands.Bot):
                 session["conversation_history"],
                 session["scenario"].name,
                 character_name,
-                session["scenario"].objectives
+                session["scenario"].objectives,
+                session["scenario"].context,
+                self._get_user_role_description(session["scenario"])
             )
             
             # Send feedback
@@ -362,7 +364,27 @@ class FlirBot(commands.Bot):
                 del self.active_sessions[user_id]
                 self.save_sessions()
     
-    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, objectives: List[str]) -> str:
+    def _get_user_role_description(self, scenario) -> str:
+        """Get a description of the user's role in the scenario"""
+        # Extract user role from scenario context
+        context = scenario.context.lower()
+        
+        if "you're a team lead" in context or "you're a manager" in context:
+            return "You are the manager/team lead who needs to handle difficult workplace situations"
+        elif "you're a software developer" in context or "you're an employee" in context:
+            return "You are the employee who needs to navigate workplace challenges and conflicts"
+        elif "unrealistic deadline" in scenario.name.lower() or "deadline has been moved up" in context:
+            return "You are the software developer who needs to push back against an unrealistic project deadline set by your boss"
+        elif "you're on a first date" in context or "you've been dating" in context:
+            return "You are the person navigating dating situations and relationships"
+        elif "your mother" in context or "your father" in context or "your brother" in context:
+            return "You are the family member who needs to set boundaries and handle family conflicts"
+        elif "you're a junior employee" in context:
+            return "You are the junior employee who needs to stand up for yourself in workplace situations"
+        else:
+            return "You are the person practicing social skills in this challenging scenario"
+    
+    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, objectives: List[str], scenario_context: str = None, user_role_description: str = None) -> str:
         """Generate feedback with fallback mechanisms"""
         try:
             # Try Gemini first
@@ -370,7 +392,9 @@ class FlirBot(commands.Bot):
                 conversation_history=conversation_history,
                 scenario_name=scenario_name,
                 character_name=character_name,
-                scenario_objectives=objectives
+                scenario_objectives=objectives,
+                scenario_context=scenario_context,
+                user_role_description=user_role_description
             )
             return feedback
         except Exception as e:

@@ -54,7 +54,9 @@ class GeminiClient:
         conversation_history: List[Dict], 
         scenario_name: str,
         character_name: str,
-        scenario_objectives: List[str]
+        scenario_objectives: List[str],
+        scenario_context: str = None,
+        user_role_description: str = None
     ) -> str:
         """
         Generate feedback based on conversation history and scenario objectives
@@ -71,18 +73,26 @@ class GeminiClient:
         # Format conversation history
         conversation_text = self._format_conversation_history(conversation_history)
         
-        # Create feedback prompt
-        prompt = f"""You are an expert social skills coach analyzing a conversation between a user and a set of AI characters in a social skills training scenario.
+        # Create feedback prompt with proper context
+        user_role_context = f"\nUSER'S ROLE IN SCENARIO: {user_role_description}" if user_role_description else ""
+        scenario_context_info = f"\nSCENARIO CONTEXT: {scenario_context}" if scenario_context else ""
+        
+        prompt = f"""You are an expert social skills coach analyzing a conversation between a user and AI characters in a social skills training scenario.
 
 SCENARIO: {scenario_name}
 CHARACTER: {character_name}
-CHARACTERS: {', '.join(characters)}
-OBJECTIVES: {', '.join(scenario_objectives)}
+OBJECTIVES: {', '.join(scenario_objectives)}{user_role_context}{scenario_context_info}
 
 CONVERSATION HISTORY:
 {conversation_text}
 
-Please provide constructive feedback on the user's social skills performance. Focus on:
+IMPORTANT: The user is the person being trained in social skills. The AI characters (like {character_name}) are playing specific roles to challenge and train the user. Evaluate the USER's performance, not the AI characters' performance.
+
+For example, in a workplace scenario where the user is an employee being pressured by a boss:
+- Evaluate how well the user stood up for themselves, communicated their concerns, and handled the pressure
+- Do NOT evaluate the boss character's aggressive behavior (that's intentional to create challenge)
+
+Please provide constructive feedback on the USER's social skills performance. Focus on:
 
 1. **Communication Strengths**: What did the user do well?
 2. **Areas for Improvement**: What could be improved?
