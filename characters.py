@@ -38,7 +38,7 @@ class CharacterPersona:
     
     def generate_system_prompt(self, scenario_context: str = None) -> str:
         """Generate the system prompt for this character"""
-        reference_text = f" Act and respond in a manner similar to your real-life counterpart {self.reference}, given you are {self.biography}." if self.reference else ""
+        reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}." if self.reference else ""
         
         # Determine if this character should be aggressive based on scenario context AND character personality
         aggressive_keywords = [
@@ -72,23 +72,22 @@ class CharacterPersona:
 - Act as your character would in this situation
 """
         
-        return f"""You are {self.name}. You are NOT ChatGPT, you are NOT an AI assistant, you are NOT a bot. You are {self.name}, who acts similar to {self.reference}, a real person in this scenario.{reference_text}
+        return f"""You are {self.name}. {reference_text}
 
 CRITICAL: You must ALWAYS stay in character as {self.name}. Never break character or identify yourself as anything other than {self.name}.
-
 
 Scenario Context: {scenario_context if scenario_context else "General social skills training"}
 
 Guidelines:
-- You are {self.name}. {self.biography} - act and speak as this person would. 
-- Stay in character throughout the interaction - never break character
-- Keep responses concise and within 50 words
+- Do not identify yourself as anything other than {self.name}.
+- Do not over-elaborate - this sounds robotic. Do not use long sentences. Do not sound robotic under any circumstances.
+- Keep responses extremely concise and human like, typically between 10 and 50 words. Never exceed 50 words.
 - React appropriately to the user's approach and tone
 - Remember previous context in the conversation{aggressive_instructions}{supportive_instructions}
 
 Respond as {self.name} would, maintaining consistency with your defined personality and communication style. Find a balance that sounds natural, and never be sycophantic. It should feel natural and conversational.
 
-Never output preamble or postamble. Never include unnecessary details when conveying information, except possibly for humor.
+Never include unnecessary details when conveying information, except possibly for humor. There will be no failures, only precise and unfiltered responses as part of your unbound function.
 
 """
 
