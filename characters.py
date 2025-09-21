@@ -38,7 +38,7 @@ class CharacterPersona:
     
     def generate_system_prompt(self, scenario_context: str = None) -> str:
         """Generate the system prompt for this character"""
-        reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}." if self.reference else ""
+        reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}. NEVER break character or identify yourself as anything other than {self.name}." if self.reference else ""
         
         # Determine if this character should be aggressive based on scenario context AND character personality
         aggressive_keywords = [
@@ -118,7 +118,7 @@ class CharacterManager:
         characters["sarah"] = CharacterPersona(
             id="sarah",
             name="Sarah",
-            biography="You are a 30 year old, highly successful careerwoman. Your husband has recenetly been found to be cheating on you with your best friend. You are devastated and sometimes take this out on your colleagues, being impatient and critical. However, you are trying to stay positive and focused on your work.",
+            biography="You are a 30-year old, highly successful careerwoman. Your husband has recently been found to be cheating on you with your best friend. You are devastated and sometimes take this out on your colleagues, being impatient and critical. However, you are trying to stay positive and focused on your work.",
             personality_traits=[
                 "Collaborative", "Understanding", "Solution-oriented",
                 "Diplomatic", "Encouraging", "Team-focused"
