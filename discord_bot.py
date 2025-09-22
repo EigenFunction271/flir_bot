@@ -995,7 +995,7 @@ Keep it constructive and specific."""
             )
             
             await ctx.send(embed=embed)
-        
+            
             # Generate and send opening messages from all characters
             try:
                 # Send opening messages to user's DM
@@ -1031,18 +1031,18 @@ This is the start of a social skills training conversation. Be true to your char
                             
                             # Add the opening message to conversation history
                             self.active_sessions[user_id]["conversation_history"].append({
-                    "role": "assistant",
+                                "role": "assistant",
                                 "content": opening_message,
-                    "character": character.name
-                })
-                
+                                "character": character.name
+                            })
+                            
                             # Create embed for this character's opening message
                             opening_embed = discord.Embed(
-                    title=f"💬 {character.name}",
+                                title=f"💬 {character.name}",
                                 description=opening_message,
-                    color=0x0099ff
-                )
-                
+                                color=0x0099ff
+                            )
+                            
                             opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
                             
                             await dm_channel.send(embed=opening_embed)
@@ -1053,10 +1053,10 @@ This is the start of a social skills training conversation. Be true to your char
                         except Exception as e:
                             logger.error(f"Error generating opening message for character {character.name}: {e}")
                             continue
-                
-                # Save session state
-                self.save_sessions()
-                
+                    
+                    # Save session state
+                    self.save_sessions()
+                    
                     # Send confirmation in the original channel
                     character_names = [char.name for char in scenario_characters]
                     await ctx.send(f"✅ **{', '.join(character_names)}** have sent you opening messages! Check your DMs to continue the conversation.")
@@ -1064,7 +1064,7 @@ This is the start of a social skills training conversation. Be true to your char
                 except discord.Forbidden:
                     await ctx.send(f"❌ I couldn't send you a DM. Please check your privacy settings and allow DMs from server members.")
                     
-        except Exception as e:
+            except Exception as e:
                 logger.error(f"Error generating opening messages: {e}")
                 await ctx.send(f"❌ Error starting the conversation. Please try again.")
         
@@ -1209,31 +1209,31 @@ This is the start of a social skills training conversation. Be true to your char
     
         logger.info("✅ All bot commands loaded successfully")
     
-        async def on_message(self, message):
-            try:
-                # Ignore bot messages
-                if message.author.bot:
-                    return
-            
+    async def on_message(self, message):
+        try:
+            # Ignore bot messages
+            if message.author.bot:
+                return
+        
             logger.info(f"📨 MESSAGE: Received message from {message.author.name} ({message.author.id}): '{message.content[:100]}...' in {message.guild.name if message.guild else 'DM'}")
-            
-                # Process commands first
-                await self.process_commands(message)
+        
+            # Process commands first
+            await self.process_commands(message)
             logger.info(f"✅ MESSAGE: Processed commands for message from {message.author.name}")
-            
-                # Handle direct messages to characters
-                user_id = message.author.id
+        
+            # Handle direct messages to characters
+            user_id = message.author.id
             logger.info(f"🔍 MESSAGE: Checking if user {user_id} has active session and message is not a command")
             logger.info(f"📊 MESSAGE: User in active sessions: {user_id in self.active_sessions}")
             logger.info(f"📊 MESSAGE: Message starts with prefix '{Config.BOT_PREFIX}': {message.content.startswith(Config.BOT_PREFIX)}")
             logger.info(f"📊 MESSAGE: Is DM: {message.guild is None}")
+        
+            if (user_id in self.active_sessions and 
+                not message.content.startswith(Config.BOT_PREFIX) and
+                message.guild is None):  # Direct message only
             
-                if (user_id in self.active_sessions and 
-                    not message.content.startswith(Config.BOT_PREFIX) and
-                    message.guild is None):  # Direct message only
-                
-                    session = self.active_sessions[user_id]
-                
+                session = self.active_sessions[user_id]
+            
                 # Validate session structure
                 if not isinstance(session, dict) or "scenario" not in session:
                     logger.error(f"Invalid session structure for user {user_id}")
@@ -1241,7 +1241,7 @@ This is the start of a social skills training conversation. Be true to your char
                     await message.channel.send("❌ Your session is corrupted. Please start a new scenario.")
                     return
                 
-                    current_char = session.get("current_character")
+                current_char = session.get("current_character")
                 available_characters = session.get("characters", [])
                 logger.info(f"🎭 MESSAGE: Current character for user {user_id}: {current_char.name if current_char else 'None'}")
                 
@@ -1258,7 +1258,7 @@ This is the start of a social skills training conversation. Be true to your char
                     # Send confirmation of character switch
                     await message.channel.send(f"👤 Now talking to **{target_character.name}**")
                 
-                    if current_char:
+                if current_char:
                     # Validate user input
                     logger.info(f"🔍 MESSAGE: Validating user input: '{message.content[:50]}...'")
                     is_valid, error_msg = self.validate_user_input(message.content)
@@ -1269,18 +1269,18 @@ This is the start of a social skills training conversation. Be true to your char
                     logger.info(f"✅ MESSAGE: Input validation passed")
                     
                     logger.info(f"🤔 MESSAGE: Sending thinking message for {current_char.name}")
-                        await message.channel.send(f"🤔 {current_char.name} is thinking...")
+                    await message.channel.send(f"🤔 {current_char.name} is thinking...")
                     
-                        # Add user message to conversation history
-                        session["conversation_history"].append({
-                            "role": "user",
-                            "content": message.content,
+                    # Add user message to conversation history
+                    session["conversation_history"].append({
+                        "role": "user",
+                        "content": message.content,
                         "character": "user"
-                        })
+                    })
                     logger.info(f"📝 MESSAGE: Added user message to conversation history. Total messages: {len(session['conversation_history'])}")
                     
-                        # Increment turn count
-                        session["turn_count"] += 1
+                    # Increment turn count
+                    session["turn_count"] += 1
                     logger.info(f"🔄 MESSAGE: Incremented turn count to {session['turn_count']}")
                 
                     # Generate responses from all characters in the scenario (except coach)
@@ -1384,30 +1384,30 @@ This is the start of a social skills training conversation. Be true to your char
                     character_role_context = session["scenario"].get_character_role_context(character.id)
                     
                     # Generate response for this character using CURRENT conversation history
-                        response = await self._generate_character_response_with_fallback(
+                    response = await self._generate_character_response_with_fallback(
                         user_message, character, session["conversation_history"], session["scenario"].context, character_role_context
-                        )
+                    )
                     logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
                     
                     # Add character response to conversation history IMMEDIATELY
                     # This ensures the next character sees this response
-                        session["conversation_history"].append({
-                            "role": "assistant",
-                            "content": response,
+                    session["conversation_history"].append({
+                        "role": "assistant",
+                        "content": response,
                         "character": character.name
-                        })
+                    })
                     logger.info(f"🎭 MULTI-CHAR: Added {character.name}'s response to history. New length: {len(session['conversation_history'])}")
                     
                     # Create embed for this character's response
-                        embed = discord.Embed(
+                    embed = discord.Embed(
                         title=f"💬 {character.name}",
-                            description=response,
-                            color=0x0099ff
-                        )
+                        description=response,
+                        color=0x0099ff
+                    )
                     
                     # Add turn counter to embed
-                        turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                        embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
                     
                     # Send the response
                     logger.info(f"🎭 MULTI-CHAR: Sending response from {character.name}")
@@ -1422,32 +1422,32 @@ This is the start of a social skills training conversation. Be true to your char
                     # Continue with other characters even if one fails
                     continue
                     
-            except Exception as e:
-            logger.error(f"Error in multi-character response generation: {e}")
-            # Fallback to single character response
-            current_char = session.get("current_character")
-            if current_char:
-                character_role_context = session["scenario"].get_character_role_context(current_char.id)
-                response = await self._generate_character_response_with_fallback(
-                    user_message, current_char, session["conversation_history"], session["scenario"].context, character_role_context
-                )
-                
-                session["conversation_history"].append({
-                    "role": "assistant",
-                    "content": response,
-                    "character": current_char.name
-                })
-                
-                embed = discord.Embed(
-                    title=f"💬 {current_char.name}",
-                    description=response,
-                    color=0x0099ff
-                )
-                
-                turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
-                
-                await channel.send(embed=embed)
+        except Exception as e:
+                logger.error(f"Error in multi-character response generation: {e}")
+                # Fallback to single character response
+                current_char = session.get("current_character")
+                if current_char:
+                    character_role_context = session["scenario"].get_character_role_context(current_char.id)
+                    response = await self._generate_character_response_with_fallback(
+                        user_message, current_char, session["conversation_history"], session["scenario"].context, character_role_context
+                    )
+                    
+                    session["conversation_history"].append({
+                        "role": "assistant",
+                        "content": response,
+                        "character": current_char.name
+                    })
+                    
+                    embed = discord.Embed(
+                        title=f"💬 {current_char.name}",
+                        description=response,
+                        color=0x0099ff
+                    )
+                    
+                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                    
+                    await channel.send(embed=embed)
 
 async def health_check(request):
     """Health check endpoint for Render with error boundaries"""
