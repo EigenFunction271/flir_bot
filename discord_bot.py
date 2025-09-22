@@ -359,19 +359,25 @@ class FlirBot(commands.Bot):
             # Message 2: Strengths & Areas for Improvement
             embed2 = discord.Embed(title="💪 Strengths & Areas for Improvement", color=0x00ff00)
             
-            strengths = feedback_data.get("strengths", [])
-            if strengths:
+            strengths_text = feedback_data.get("strengths_text", "")
+            if strengths_text:
+                # Truncate if too long for Discord embed
+                if len(strengths_text) > 1024:
+                    strengths_text = strengths_text[:1021] + "..."
                 embed2.add_field(
                     name="✅ Communication Strengths", 
-                    value="\n".join(f"• {strength}" for strength in strengths), 
+                    value=strengths_text, 
                     inline=False
                 )
             
-            improvements = feedback_data.get("improvements", [])
-            if improvements:
+            improvements_text = feedback_data.get("improvements_text", "")
+            if improvements_text:
+                # Truncate if too long for Discord embed
+                if len(improvements_text) > 1024:
+                    improvements_text = improvements_text[:1021] + "..."
                 embed2.add_field(
                     name="🔧 Areas for Improvement", 
-                    value="\n".join(f"• {improvement}" for improvement in improvements), 
+                    value=improvements_text, 
                     inline=False
                 )
             
@@ -386,11 +392,14 @@ class FlirBot(commands.Bot):
             # Message 3: Key Takeaways
             embed3 = discord.Embed(title="🎯 Key Takeaways", color=0x00ff00)
             
-            takeaways = feedback_data.get("key_takeaways", [])
-            if takeaways:
+            takeaways_text = feedback_data.get("key_takeaways_text", "")
+            if takeaways_text:
+                # Truncate if too long for Discord embed
+                if len(takeaways_text) > 1024:
+                    takeaways_text = takeaways_text[:1021] + "..."
                 embed3.add_field(
                     name="💡 Actionable Tips", 
-                    value="\n".join(f"• {takeaway}" for takeaway in takeaways), 
+                    value=takeaways_text, 
                     inline=False
                 )
             
@@ -501,14 +510,15 @@ Keep it constructive and specific."""
         rating_match = re.search(r'(\d+)/10', text_feedback)
         rating = rating_match.group(0) if rating_match else "7/10"
         
-        # Try to extract sections
-        strengths = []
-        improvements = []
-        takeaways = []
+        # Try to extract sections from text
+        strengths_text = ""
+        improvements_text = ""
+        takeaways_text = ""
         
-        # Simple text parsing to extract key points
+        # Simple text parsing to extract sections
         lines = text_feedback.split('\n')
         current_section = None
+        current_content = []
         
         for line in lines:
             line = line.strip()
@@ -516,35 +526,61 @@ Keep it constructive and specific."""
                 continue
                 
             if 'strength' in line.lower() or 'good' in line.lower() or 'well' in line.lower():
+                if current_section and current_content:
+                    if current_section == 'strengths':
+                        strengths_text = ' '.join(current_content)
+                    elif current_section == 'improvements':
+                        improvements_text = ' '.join(current_content)
+                    elif current_section == 'takeaways':
+                        takeaways_text = ' '.join(current_content)
                 current_section = 'strengths'
+                current_content = []
             elif 'improvement' in line.lower() or 'better' in line.lower() or 'could' in line.lower():
+                if current_section and current_content:
+                    if current_section == 'strengths':
+                        strengths_text = ' '.join(current_content)
+                    elif current_section == 'improvements':
+                        improvements_text = ' '.join(current_content)
+                    elif current_section == 'takeaways':
+                        takeaways_text = ' '.join(current_content)
                 current_section = 'improvements'
+                current_content = []
             elif 'takeaway' in line.lower() or 'tip' in line.lower() or 'next' in line.lower():
+                if current_section and current_content:
+                    if current_section == 'strengths':
+                        strengths_text = ' '.join(current_content)
+                    elif current_section == 'improvements':
+                        improvements_text = ' '.join(current_content)
+                    elif current_section == 'takeaways':
+                        takeaways_text = ' '.join(current_content)
                 current_section = 'takeaways'
-            elif line.startswith('-') or line.startswith('•') or line.startswith('*'):
-                # Extract bullet point
-                point = re.sub(r'^[-•*]\s*', '', line)
-                if current_section == 'strengths' and len(strengths) < 3:
-                    strengths.append(point)
-                elif current_section == 'improvements' and len(improvements) < 3:
-                    improvements.append(point)
-                elif current_section == 'takeaways' and len(takeaways) < 3:
-                    takeaways.append(point)
+                current_content = []
+            else:
+                current_content.append(line)
+        
+        # Handle the last section
+        if current_section and current_content:
+            if current_section == 'strengths':
+                strengths_text = ' '.join(current_content)
+            elif current_section == 'improvements':
+                improvements_text = ' '.join(current_content)
+            elif current_section == 'takeaways':
+                takeaways_text = ' '.join(current_content)
         
         # Fallback if no sections found
-        if not strengths:
-            strengths = ["Engaged with the scenario", "Showed effort in communication", "Attempted to address the situation"]
-        if not improvements:
-            improvements = ["Continue practicing assertiveness", "Work on clear communication", "Focus on scenario objectives"]
-        if not takeaways:
-            takeaways = ["Practice active listening", "Be more direct in communication", "Set clear boundaries"]
+        if not strengths_text:
+            strengths_text = "Engaged with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Showed effort in communication - You maintained a professional tone and attempted to address the situation constructively. Attempted to address the situation - You made genuine attempts to understand and work through the scenario objectives."
+        if not improvements_text:
+            improvements_text = "Continue practicing assertiveness - Try being more direct about your needs and concerns. Work on clear communication - Be more specific about your points and provide concrete examples. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario."
+        if not takeaways_text:
+            takeaways_text = "Practice active listening - When the other person speaks, acknowledge their points before responding. Be more direct in communication - Use 'I' statements to express your needs clearly. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
         
         return {
             "rating": rating,
             "overall_assessment": f"Performance analysis completed for {scenario_name} with {character_name}. See detailed feedback below.",
-            "strengths": strengths[:3],  # Limit to 3 items
-            "improvements": improvements[:3],
-            "key_takeaways": takeaways[:3]
+            "strengths_text": strengths_text,
+            "improvements_text": improvements_text,
+            "key_takeaways_text": takeaways_text
         }
     
     def _generate_basic_feedback(self, conversation_history: List[Dict], scenario_name: str, character_name: str) -> dict:
@@ -554,21 +590,9 @@ Keep it constructive and specific."""
         return {
             "rating": "7/10",
             "overall_assessment": f"You completed {turn_count} turns with {character_name} in the {scenario_name} scenario. Basic feedback provided due to system limitations.",
-            "strengths": [
-                "Engaged with the scenario and completed the conversation",
-                "Attempted to address the situation presented",
-                "Showed effort in communication and interaction"
-            ],
-            "improvements": [
-                "Practice active listening and asking follow-up questions",
-                "Be more authentic and genuine in your responses",
-                "Pay closer attention to the other person's emotional cues"
-            ],
-            "key_takeaways": [
-                "Try the scenario again with a different approach",
-                "Focus on one specific skill you want to improve",
-                "Consider practicing with different characters to build versatility"
-            ]
+            "strengths_text": "Engaged with the scenario and completed the conversation - You actively participated in the social skills training exercise. Attempted to address the situation presented - You made genuine efforts to work through the scenario challenges. Showed effort in communication and interaction - You demonstrated willingness to engage with the AI characters.",
+            "improvements_text": "Practice active listening and asking follow-up questions - Try to better understand the other person's perspective before responding. Be more authentic and genuine in your responses - Focus on expressing your true thoughts and feelings rather than giving generic answers. Pay closer attention to the other person's emotional cues - Notice their tone, body language, and underlying concerns.",
+            "key_takeaways_text": "Try the scenario again with a different approach - Consider how you might handle the situation differently based on what you learned. Focus on one specific skill you want to improve - Pick one communication skill to work on in future scenarios. Consider practicing with different characters to build versatility - Each character presents unique challenges that can help you develop different aspects of your communication skills."
         }
     
     
@@ -971,7 +995,7 @@ Keep it constructive and specific."""
             )
             
             await ctx.send(embed=embed)
-            
+        
             # Generate and send opening messages from all characters
             try:
                 # Send opening messages to user's DM
@@ -997,25 +1021,28 @@ Context: {scenario.context}
 
 This is the start of a social skills training conversation. Be true to your character's personality and communication style."""
                             
-                            # Generate opening message with scenario context
+                            # Get character-specific role context from scenario
+                            character_role_context = scenario.get_character_role_context(character.id)
+                            
+                            # Generate opening message with scenario context and character role
                             opening_message = await self._generate_character_response_with_fallback(
-                                opening_prompt, character, [], scenario.context
+                                opening_prompt, character, [], scenario.context, character_role_context
                             )
                             
                             # Add the opening message to conversation history
                             self.active_sessions[user_id]["conversation_history"].append({
-                                "role": "assistant",
+                    "role": "assistant",
                                 "content": opening_message,
-                                "character": character.name
-                            })
-                            
+                    "character": character.name
+                })
+                
                             # Create embed for this character's opening message
                             opening_embed = discord.Embed(
-                                title=f"💬 {character.name}",
+                    title=f"💬 {character.name}",
                                 description=opening_message,
-                                color=0x0099ff
-                            )
-                            
+                    color=0x0099ff
+                )
+                
                             opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
                             
                             await dm_channel.send(embed=opening_embed)
@@ -1026,10 +1053,10 @@ This is the start of a social skills training conversation. Be true to your char
                         except Exception as e:
                             logger.error(f"Error generating opening message for character {character.name}: {e}")
                             continue
-                    
-                    # Save session state
-                    self.save_sessions()
-                    
+                
+                # Save session state
+                self.save_sessions()
+                
                     # Send confirmation in the original channel
                     character_names = [char.name for char in scenario_characters]
                     await ctx.send(f"✅ **{', '.join(character_names)}** have sent you opening messages! Check your DMs to continue the conversation.")
@@ -1037,7 +1064,7 @@ This is the start of a social skills training conversation. Be true to your char
                 except discord.Forbidden:
                     await ctx.send(f"❌ I couldn't send you a DM. Please check your privacy settings and allow DMs from server members.")
                     
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"Error generating opening messages: {e}")
                 await ctx.send(f"❌ Error starting the conversation. Please try again.")
         
@@ -1179,33 +1206,33 @@ This is the start of a social skills training conversation. Be true to your char
             )
             
             await ctx.send(embed=embed)
-        
+    
         logger.info("✅ All bot commands loaded successfully")
     
-    async def on_message(self, message):
-        try:
-            # Ignore bot messages
-            if message.author.bot:
-                return
+        async def on_message(self, message):
+            try:
+                # Ignore bot messages
+                if message.author.bot:
+                    return
             
             logger.info(f"📨 MESSAGE: Received message from {message.author.name} ({message.author.id}): '{message.content[:100]}...' in {message.guild.name if message.guild else 'DM'}")
-        
-            # Process commands first
-            await self.process_commands(message)
+            
+                # Process commands first
+                await self.process_commands(message)
             logger.info(f"✅ MESSAGE: Processed commands for message from {message.author.name}")
-        
-            # Handle direct messages to characters
-            user_id = message.author.id
+            
+                # Handle direct messages to characters
+                user_id = message.author.id
             logger.info(f"🔍 MESSAGE: Checking if user {user_id} has active session and message is not a command")
             logger.info(f"📊 MESSAGE: User in active sessions: {user_id in self.active_sessions}")
             logger.info(f"📊 MESSAGE: Message starts with prefix '{Config.BOT_PREFIX}': {message.content.startswith(Config.BOT_PREFIX)}")
             logger.info(f"📊 MESSAGE: Is DM: {message.guild is None}")
             
-            if (user_id in self.active_sessions and 
-                not message.content.startswith(Config.BOT_PREFIX) and
-                message.guild is None):  # Direct message only
-            
-                session = self.active_sessions[user_id]
+                if (user_id in self.active_sessions and 
+                    not message.content.startswith(Config.BOT_PREFIX) and
+                    message.guild is None):  # Direct message only
+                
+                    session = self.active_sessions[user_id]
                 
                 # Validate session structure
                 if not isinstance(session, dict) or "scenario" not in session:
@@ -1214,7 +1241,7 @@ This is the start of a social skills training conversation. Be true to your char
                     await message.channel.send("❌ Your session is corrupted. Please start a new scenario.")
                     return
                 
-                current_char = session.get("current_character")
+                    current_char = session.get("current_character")
                 available_characters = session.get("characters", [])
                 logger.info(f"🎭 MESSAGE: Current character for user {user_id}: {current_char.name if current_char else 'None'}")
                 
@@ -1231,7 +1258,7 @@ This is the start of a social skills training conversation. Be true to your char
                     # Send confirmation of character switch
                     await message.channel.send(f"👤 Now talking to **{target_character.name}**")
                 
-                if current_char:
+                    if current_char:
                     # Validate user input
                     logger.info(f"🔍 MESSAGE: Validating user input: '{message.content[:50]}...'")
                     is_valid, error_msg = self.validate_user_input(message.content)
@@ -1242,18 +1269,18 @@ This is the start of a social skills training conversation. Be true to your char
                     logger.info(f"✅ MESSAGE: Input validation passed")
                     
                     logger.info(f"🤔 MESSAGE: Sending thinking message for {current_char.name}")
-                    await message.channel.send(f"🤔 {current_char.name} is thinking...")
-                
-                    # Add user message to conversation history
-                    session["conversation_history"].append({
-                        "role": "user",
-                        "content": message.content,
+                        await message.channel.send(f"🤔 {current_char.name} is thinking...")
+                    
+                        # Add user message to conversation history
+                        session["conversation_history"].append({
+                            "role": "user",
+                            "content": message.content,
                         "character": "user"
-                    })
+                        })
                     logger.info(f"📝 MESSAGE: Added user message to conversation history. Total messages: {len(session['conversation_history'])}")
-                
-                    # Increment turn count
-                    session["turn_count"] += 1
+                    
+                        # Increment turn count
+                        session["turn_count"] += 1
                     logger.info(f"🔄 MESSAGE: Incremented turn count to {session['turn_count']}")
                 
                     # Generate responses from all characters in the scenario (except coach)
@@ -1357,30 +1384,30 @@ This is the start of a social skills training conversation. Be true to your char
                     character_role_context = session["scenario"].get_character_role_context(character.id)
                     
                     # Generate response for this character using CURRENT conversation history
-                    response = await self._generate_character_response_with_fallback(
+                        response = await self._generate_character_response_with_fallback(
                         user_message, character, session["conversation_history"], session["scenario"].context, character_role_context
-                    )
+                        )
                     logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
                     
                     # Add character response to conversation history IMMEDIATELY
                     # This ensures the next character sees this response
-                    session["conversation_history"].append({
-                        "role": "assistant",
-                        "content": response,
+                        session["conversation_history"].append({
+                            "role": "assistant",
+                            "content": response,
                         "character": character.name
-                    })
+                        })
                     logger.info(f"🎭 MULTI-CHAR: Added {character.name}'s response to history. New length: {len(session['conversation_history'])}")
                     
                     # Create embed for this character's response
-                    embed = discord.Embed(
+                        embed = discord.Embed(
                         title=f"💬 {character.name}",
-                        description=response,
-                        color=0x0099ff
-                    )
+                            description=response,
+                            color=0x0099ff
+                        )
                     
                     # Add turn counter to embed
-                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                        turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                        embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
                     
                     # Send the response
                     logger.info(f"🎭 MULTI-CHAR: Sending response from {character.name}")
@@ -1395,7 +1422,7 @@ This is the start of a social skills training conversation. Be true to your char
                     # Continue with other characters even if one fails
                     continue
                     
-        except Exception as e:
+            except Exception as e:
             logger.error(f"Error in multi-character response generation: {e}")
             # Fallback to single character response
             current_char = session.get("current_character")

@@ -105,21 +105,9 @@ Format your feedback as JSON with these exact fields:
 {{
     "rating": "X/10 - where X is a number from 1-10",
     "overall_assessment": "Brief summary of performance (2-3 sentences)",
-    "strengths": [
-        "Strength 1 with specific example from conversation",
-        "Strength 2 with specific example from conversation",
-        "Strength 3 with specific example from conversation"
-    ],
-    "improvements": [
-        "Area for improvement 1 with specific suggestion",
-        "Area for improvement 2 with specific suggestion",
-        "Area for improvement 3 with specific suggestion"
-    ],
-    "key_takeaways": [
-        "Actionable tip 1 for future conversations",
-        "Actionable tip 2 for future conversations",
-        "Actionable tip 3 for future conversations"
-    ]
+    "strengths_text": "Detailed analysis of communication strengths with specific examples from the conversation. Include 2-3 key strengths with concrete examples.",
+    "improvements_text": "Detailed analysis of areas for improvement with specific suggestions. Include 2-3 key areas with actionable advice.",
+    "key_takeaways_text": "Detailed actionable tips and strategies for future conversations. Include 2-3 key takeaways with specific guidance."
 }}
 
 IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the JSON object."""
@@ -141,7 +129,7 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
                 feedback_data = json.loads(feedback_text)
                 
                 # Validate required fields
-                required_fields = ["rating", "overall_assessment", "strengths", "improvements", "key_takeaways"]
+                required_fields = ["rating", "overall_assessment", "strengths_text", "improvements_text", "key_takeaways_text"]
                 for field in required_fields:
                     if field not in feedback_data:
                         raise ValueError(f"Missing required field: {field}")
@@ -183,21 +171,9 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
         fallback_data = {
             "rating": "7/10",  # Default rating
             "overall_assessment": "Performance analysis completed. See detailed feedback below.",
-            "strengths": [
-                "Communication skills demonstrated",
-                "Engagement with the scenario",
-                "Effort to address the situation"
-            ],
-            "improvements": [
-                "Continue practicing assertiveness",
-                "Work on clear communication",
-                "Focus on scenario objectives"
-            ],
-            "key_takeaways": [
-                "Practice active listening",
-                "Be more direct in communication",
-                "Set clear boundaries"
-            ]
+            "strengths_text": "Communication skills demonstrated - You maintained a professional tone and attempted to address the situation constructively. Engagement with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Effort to address the situation - You made genuine attempts to understand and work through the scenario objectives.",
+            "improvements_text": "Continue practicing assertiveness - Try being more direct about your needs and concerns. For example, instead of 'I think maybe we could...' try 'I need...' or 'I believe we should...'. Work on clear communication - Be more specific about your points and provide concrete examples. Avoid vague statements and focus on actionable solutions. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario.",
+            "key_takeaways_text": "Practice active listening - When the other person speaks, acknowledge their points before responding. Try saying 'I understand that you feel...' or 'I hear that you're concerned about...'. Be more direct in communication - Use 'I' statements to express your needs clearly. Instead of 'Maybe we should consider...' try 'I need...' or 'I want...'. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
         }
         
         # Try to extract rating if present
