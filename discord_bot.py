@@ -470,7 +470,8 @@ Keep it constructive and specific."""
                     system_prompt="You are a social skills coach providing constructive feedback.",
                     model_type="fast"
                 )
-                return feedback
+                # Convert text feedback to structured format
+                return self._convert_text_to_structured_feedback(feedback, scenario_name, character_name)
             except Exception as e2:
                 logger.error(f"Groq fallback also failed: {e2}")
                 
@@ -491,6 +492,60 @@ Keep it constructive and specific."""
                 formatted.append(f"{character}: {content}")
         
         return "\n".join(formatted)
+    
+    def _convert_text_to_structured_feedback(self, text_feedback: str, scenario_name: str, character_name: str) -> dict:
+        """Convert text feedback to structured format"""
+        import re
+        
+        # Try to extract rating
+        rating_match = re.search(r'(\d+)/10', text_feedback)
+        rating = rating_match.group(0) if rating_match else "7/10"
+        
+        # Try to extract sections
+        strengths = []
+        improvements = []
+        takeaways = []
+        
+        # Simple text parsing to extract key points
+        lines = text_feedback.split('\n')
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            if 'strength' in line.lower() or 'good' in line.lower() or 'well' in line.lower():
+                current_section = 'strengths'
+            elif 'improvement' in line.lower() or 'better' in line.lower() or 'could' in line.lower():
+                current_section = 'improvements'
+            elif 'takeaway' in line.lower() or 'tip' in line.lower() or 'next' in line.lower():
+                current_section = 'takeaways'
+            elif line.startswith('-') or line.startswith('•') or line.startswith('*'):
+                # Extract bullet point
+                point = re.sub(r'^[-•*]\s*', '', line)
+                if current_section == 'strengths' and len(strengths) < 3:
+                    strengths.append(point)
+                elif current_section == 'improvements' and len(improvements) < 3:
+                    improvements.append(point)
+                elif current_section == 'takeaways' and len(takeaways) < 3:
+                    takeaways.append(point)
+        
+        # Fallback if no sections found
+        if not strengths:
+            strengths = ["Engaged with the scenario", "Showed effort in communication", "Attempted to address the situation"]
+        if not improvements:
+            improvements = ["Continue practicing assertiveness", "Work on clear communication", "Focus on scenario objectives"]
+        if not takeaways:
+            takeaways = ["Practice active listening", "Be more direct in communication", "Set clear boundaries"]
+        
+        return {
+            "rating": rating,
+            "overall_assessment": f"Performance analysis completed for {scenario_name} with {character_name}. See detailed feedback below.",
+            "strengths": strengths[:3],  # Limit to 3 items
+            "improvements": improvements[:3],
+            "key_takeaways": takeaways[:3]
+        }
     
     def _generate_basic_feedback(self, conversation_history: List[Dict], scenario_name: str, character_name: str) -> dict:
         """Generate basic feedback when all AI services fail"""

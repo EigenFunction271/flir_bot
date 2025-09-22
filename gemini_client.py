@@ -102,8 +102,8 @@ Please provide constructive feedback on the USER's social skills performance. Fo
 5. **Objective Achievement**: How well did they work toward the scenario objectives?
 
 Format your feedback as JSON with these exact fields:
-{
-    "rating": "[1-10] - 10 is completely successful or very minor flaws, 1 is completely failed or repeated major flaws",
+{{
+    "rating": "X/10 - where X is a number from 1-10",
     "overall_assessment": "Brief summary of performance (2-3 sentences)",
     "strengths": [
         "Strength 1 with specific example from conversation",
@@ -120,7 +120,7 @@ Format your feedback as JSON with these exact fields:
         "Actionable tip 2 for future conversations",
         "Actionable tip 3 for future conversations"
     ]
-}
+}}
 
 IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the JSON object."""
 
@@ -156,7 +156,8 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
             
         except Exception as e:
             logger.error(f"Error generating feedback with Gemini: {str(e)}")
-            raise Exception(f"Error generating feedback with Gemini: {str(e)}")
+            # Return fallback feedback instead of raising exception
+            return self._create_fallback_feedback("")
     
     def _format_conversation_history(self, conversation_history: List[Dict]) -> str:
         """Format conversation history for feedback analysis"""
