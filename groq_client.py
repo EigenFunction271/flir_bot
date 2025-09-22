@@ -133,7 +133,12 @@ class GroqClient:
             logger.info(f"🎭 MEMORY: Message {i}: role={msg.get('role')}, character={msg.get('character', 'N/A')}, content={msg.get('content', '')[:50]}...")
             if msg["role"] == "user":
                 # User messages are relevant to all characters
-                relevant_messages.append(msg)
+                character_name = msg.get("character", "user")
+                content = msg.get("content", "")
+                relevant_messages.append({
+                    "role": "user",
+                    "content": f"The user said: {content}"
+                })
             elif msg["role"] == "assistant":
                 character_name = msg.get("character", "Unknown")
                 content = msg.get("content", "")

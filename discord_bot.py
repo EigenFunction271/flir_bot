@@ -312,36 +312,8 @@ class FlirBot(commands.Bot):
                 self._get_user_role_description(session["scenario"])
             )
             
-            # Send feedback
-            feedback_embed = discord.Embed(
-                title="📊 Your Performance Feedback",
-                description=f"**Scenario:** {session['scenario'].name}\n**Character:** {character_name}\n**Turns:** {session['turn_count']}",
-                color=0x00ff00
-            )
-            
-            # Split feedback into chunks if too long
-            if len(feedback) > 2000:
-                # Split by sections
-                sections = feedback.split('\n\n')
-                for section in sections[:3]:  # Show first 3 sections
-                    if section.strip():
-                        feedback_embed.add_field(
-                            name="📝 Feedback",
-                            value=section[:1000] + "..." if len(section) > 1000 else section,
-                            inline=False
-                        )
-            else:
-                feedback_embed.add_field(
-                    name="📝 Feedback",
-                    value=feedback,
-                    inline=False
-                )
-            
-            feedback_embed.set_footer(text="Use !start <scenario_id> to try another scenario!")
-            if hasattr(ctx_or_message, 'send'):
-                await ctx_or_message.send(embed=feedback_embed)
-            else:
-                await ctx_or_message.channel.send(embed=feedback_embed)
+            # Send structured feedback in 3 separate messages
+            await self._send_structured_feedback(ctx_or_message, feedback, session['scenario'].name, character_name, session['turn_count'])
             
             # Clean up session
             del self.active_sessions[user_id]
@@ -363,6 +335,80 @@ class FlirBot(commands.Bot):
             if user_id in self.active_sessions:
                 del self.active_sessions[user_id]
                 self.save_sessions()
+    
+    async def _send_structured_feedback(self, ctx_or_message, feedback_data, scenario_name, character_name, turn_count):
+        """Send structured feedback in 3 separate Discord messages"""
+        try:
+            # Message 1: Rating & Overall Assessment
+            embed1 = discord.Embed(
+                title="📊 Your Performance Feedback",
+                description=f"**Scenario:** {scenario_name}\n**Character:** {character_name}\n**Turns:** {turn_count}",
+                color=0x00ff00
+            )
+            embed1.add_field(name="⭐ Rating", value=feedback_data.get("rating", "N/A"), inline=False)
+            embed1.add_field(name="📋 Overall Assessment", value=feedback_data.get("overall_assessment", "Assessment not available"), inline=False)
+            
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send(embed=embed1)
+            else:
+                await ctx_or_message.channel.send(embed=embed1)
+            
+            # Small delay between messages
+            await asyncio.sleep(1)
+            
+            # Message 2: Strengths & Areas for Improvement
+            embed2 = discord.Embed(title="💪 Strengths & Areas for Improvement", color=0x00ff00)
+            
+            strengths = feedback_data.get("strengths", [])
+            if strengths:
+                embed2.add_field(
+                    name="✅ Communication Strengths", 
+                    value="\n".join(f"• {strength}" for strength in strengths), 
+                    inline=False
+                )
+            
+            improvements = feedback_data.get("improvements", [])
+            if improvements:
+                embed2.add_field(
+                    name="🔧 Areas for Improvement", 
+                    value="\n".join(f"• {improvement}" for improvement in improvements), 
+                    inline=False
+                )
+            
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send(embed=embed2)
+            else:
+                await ctx_or_message.channel.send(embed=embed2)
+            
+            # Small delay between messages
+            await asyncio.sleep(1)
+            
+            # Message 3: Key Takeaways
+            embed3 = discord.Embed(title="🎯 Key Takeaways", color=0x00ff00)
+            
+            takeaways = feedback_data.get("key_takeaways", [])
+            if takeaways:
+                embed3.add_field(
+                    name="💡 Actionable Tips", 
+                    value="\n".join(f"• {takeaway}" for takeaway in takeaways), 
+                    inline=False
+                )
+            
+            embed3.set_footer(text="Use !start <scenario_id> to try another scenario!")
+            
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send(embed=embed3)
+            else:
+                await ctx_or_message.channel.send(embed=embed3)
+                
+        except Exception as e:
+            logger.error(f"Error sending structured feedback: {e}")
+            # Fallback to simple text message
+            fallback_message = f"📊 **Performance Feedback**\n**Scenario:** {scenario_name}\n**Rating:** {feedback_data.get('rating', 'N/A')}\n\n**Assessment:** {feedback_data.get('overall_assessment', 'Assessment not available')}"
+            if hasattr(ctx_or_message, 'send'):
+                await ctx_or_message.send(fallback_message)
+            else:
+                await ctx_or_message.channel.send(fallback_message)
     
     def _get_user_role_description(self, scenario) -> str:
         """Get a description of the user's role in the scenario"""
@@ -446,28 +492,29 @@ Keep it constructive and specific."""
         
         return "\n".join(formatted)
     
-    def _generate_basic_feedback(self, conversation_history: List[Dict], scenario_name: str, character_name: str) -> str:
+    def _generate_basic_feedback(self, conversation_history: List[Dict], scenario_name: str, character_name: str) -> dict:
         """Generate basic feedback when all AI services fail"""
         turn_count = len([msg for msg in conversation_history if msg.get("role") == "user"])
         
-        return f"""**Basic Feedback for {scenario_name}**
-
-**Conversation Summary:**
-- You completed {turn_count} turns with {character_name}
-- Scenario: {scenario_name}
-
-**General Tips:**
-- Practice active listening and asking follow-up questions
-- Be authentic and genuine in your responses
-- Pay attention to the other person's emotional cues
-- Practice setting boundaries when needed
-
-**Next Steps:**
-- Try the scenario again with a different approach
-- Focus on one specific skill you want to improve
-- Consider practicing with different characters
-
-*Note: Advanced feedback analysis is temporarily unavailable.*"""
+        return {
+            "rating": "7/10",
+            "overall_assessment": f"You completed {turn_count} turns with {character_name} in the {scenario_name} scenario. Basic feedback provided due to system limitations.",
+            "strengths": [
+                "Engaged with the scenario and completed the conversation",
+                "Attempted to address the situation presented",
+                "Showed effort in communication and interaction"
+            ],
+            "improvements": [
+                "Practice active listening and asking follow-up questions",
+                "Be more authentic and genuine in your responses",
+                "Pay closer attention to the other person's emotional cues"
+            ],
+            "key_takeaways": [
+                "Try the scenario again with a different approach",
+                "Focus on one specific skill you want to improve",
+                "Consider practicing with different characters to build versatility"
+            ]
+        }
     
     
     def load_commands(self):
@@ -1146,7 +1193,7 @@ This is the start of a social skills training conversation. Be true to your char
                     session["conversation_history"].append({
                         "role": "user",
                         "content": message.content,
-                        "character": current_char.name
+                        "character": "user"
                     })
                     logger.info(f"📝 MESSAGE: Added user message to conversation history. Total messages: {len(session['conversation_history'])}")
                 

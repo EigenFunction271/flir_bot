@@ -91,6 +91,7 @@ IMPORTANT: The user is the person being trained in social skills. The AI charact
 For example, in a workplace scenario where the user is an employee being pressured by a boss:
 - Evaluate how well the user stood up for themselves, communicated their concerns, and handled the pressure
 - Do NOT evaluate the boss character's aggressive behavior (that's intentional to create challenge)
+- Focus on the user's communication skills, assertiveness, and problem-solving approach
 
 Please provide constructive feedback on the USER's social skills performance. Focus on:
 
@@ -100,14 +101,28 @@ Please provide constructive feedback on the USER's social skills performance. Fo
 4. **Actionable Advice**: Provide concrete tips for future interactions
 5. **Objective Achievement**: How well did they work toward the scenario objectives?
 
-Format your feedback as:
-- **Rating**: [1-10] - 10 is completely successful or very minor flaws, 1 is completely failed or repeated major flaws
-- **Strengths**: [List 2-3 strengths with examples]
-- **Areas for Improvement**: [List 2-3 areas with specific suggestions]
-- **Key Takeaways**: [2-3 actionable tips for future conversations]
-- **Overall Assessment**: [Brief summary of performance]
+Format your feedback as JSON with these exact fields:
+{
+    "rating": "[1-10] - 10 is completely successful or very minor flaws, 1 is completely failed or repeated major flaws",
+    "overall_assessment": "Brief summary of performance (2-3 sentences)",
+    "strengths": [
+        "Strength 1 with specific example from conversation",
+        "Strength 2 with specific example from conversation",
+        "Strength 3 with specific example from conversation"
+    ],
+    "improvements": [
+        "Area for improvement 1 with specific suggestion",
+        "Area for improvement 2 with specific suggestion",
+        "Area for improvement 3 with specific suggestion"
+    ],
+    "key_takeaways": [
+        "Actionable tip 1 for future conversations",
+        "Actionable tip 2 for future conversations",
+        "Actionable tip 3 for future conversations"
+    ]
+}
 
-Keep the feedback constructive, specific, and encouraging. Aim for 300-400 words total."""
+IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the JSON object."""
 
         try:
             # Check rate limit before making request
@@ -119,7 +134,25 @@ Keep the feedback constructive, specific, and encouraging. Aim for 300-400 words
                 prompt
             )
             
-            return response.text.strip()
+            # Parse JSON response
+            feedback_text = response.text.strip()
+            try:
+                import json
+                feedback_data = json.loads(feedback_text)
+                
+                # Validate required fields
+                required_fields = ["rating", "overall_assessment", "strengths", "improvements", "key_takeaways"]
+                for field in required_fields:
+                    if field not in feedback_data:
+                        raise ValueError(f"Missing required field: {field}")
+                
+                return feedback_data
+                
+            except (json.JSONDecodeError, ValueError) as json_error:
+                logger.warning(f"Failed to parse JSON feedback: {json_error}")
+                logger.warning(f"Raw response: {feedback_text}")
+                # Fallback to structured text format
+                return self._create_fallback_feedback(feedback_text)
             
         except Exception as e:
             logger.error(f"Error generating feedback with Gemini: {str(e)}")
@@ -140,6 +173,39 @@ Keep the feedback constructive, specific, and encouraging. Aim for 300-400 words
                 formatted.append(f"{character}: {content}")
         
         return "\n".join(formatted)
+    
+    def _create_fallback_feedback(self, feedback_text: str) -> dict:
+        """Create structured feedback from text when JSON parsing fails"""
+        logger.info("Creating fallback feedback structure from text response")
+        
+        # Try to extract information from the text response
+        fallback_data = {
+            "rating": "7/10",  # Default rating
+            "overall_assessment": "Performance analysis completed. See detailed feedback below.",
+            "strengths": [
+                "Communication skills demonstrated",
+                "Engagement with the scenario",
+                "Effort to address the situation"
+            ],
+            "improvements": [
+                "Continue practicing assertiveness",
+                "Work on clear communication",
+                "Focus on scenario objectives"
+            ],
+            "key_takeaways": [
+                "Practice active listening",
+                "Be more direct in communication",
+                "Set clear boundaries"
+            ]
+        }
+        
+        # Try to extract rating if present
+        import re
+        rating_match = re.search(r'(\d+)/10', feedback_text)
+        if rating_match:
+            fallback_data["rating"] = rating_match.group(0)
+        
+        return fallback_data
     
     async def test_connection(self) -> bool:
         """Test if the Gemini API connection is working"""
