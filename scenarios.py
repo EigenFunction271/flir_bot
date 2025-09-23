@@ -128,8 +128,7 @@ The date has been going well so far - you've been talking for about 30 minutes. 
             ],
             context="""You've been dating Alex for about 3 months now. Things have been going well, but you're starting to feel like you need to have a conversation about where this is heading.
 
-You're both in your late 20s and have been exclusive for about 6 weeks. You're starting to develop deeper feelings but aren't sure if Alex feels the same way. You want to know if you're both looking for something serious or if this is more casual.
-What you don't know is that Alex is actually a player and is just using you for sex. He's not looking for anything serious. 
+You're both in your late 20s and have been exclusive for about 6 weeks. You're starting to develop deeper feelings but aren't sure if Alex feels the same way. You want to know if you're both looking for something serious or if this is more casual. 
 
 Coach Kai can help guide the conversation.""",
             character_roles={
@@ -145,7 +144,7 @@ Coach Kai can help guide the conversation.""",
             name="Setting Family Boundaries",
             description="Practice setting healthy boundaries with an overbearing parent while maintaining the relationship.",
             scenario_type=ScenarioType.FAMILY,
-            characters=["patricia", "michael", "kai"],
+            characters=["patricia", "kai"],
             objectives=[
                 "Set clear boundaries respectfully",
                 "Maintain family relationships",
@@ -174,7 +173,7 @@ Your brother Michael is supportive of you setting boundaries and is available to
             name="Family Financial Boundaries",
             description="Practice saying no to family members who repeatedly ask for financial help.",
             scenario_type=ScenarioType.FAMILY,
-            characters=["patricia", "michael", "kai"],
+            characters=["patricia", "kai"],
             objectives=[
                 "Say no to financial requests firmly but kindly",
                 "Set clear financial boundaries",
@@ -205,7 +204,7 @@ You're trying to save for a house and your own future, but you feel guilty sayin
             name="Reporting Workplace Harassment",
             description="Practice reporting inappropriate behavior from a senior colleague while protecting your career.",
             scenario_type=ScenarioType.WORKPLACE,
-            characters=["david", "sarah", "kai"],
+            characters=["david", "kai"],
             objectives=[
                 "Document inappropriate behavior professionally",
                 "Navigate power dynamics carefully",
@@ -235,7 +234,7 @@ You're worried about retaliation if you report him, but you can't continue like 
             name="Confronting Workplace Sabotage",
             description="Practice confronting a colleague who has been sabotaging your work and spreading rumors about you.",
             scenario_type=ScenarioType.WORKPLACE,
-            characters=["emma", "james", "kai"],
+            characters=["emma", "kai"],
             objectives=[
                 "Confront sabotage behavior directly but professionally",
                 "Protect your reputation and work",
@@ -265,7 +264,7 @@ You're furious and hurt, but you need to handle this professionally. James, anot
             name="Confronting a Ghost",
             description="Practice confronting someone who ghosted you after months of dating, then suddenly reappeared.",
             scenario_type=ScenarioType.DATING,
-            characters=["alex", "jordan", "kai"],
+            characters=["alex", "kai"],
             objectives=[
                 "Express your hurt and disappointment clearly",
                 "Set boundaries about communication",
@@ -292,7 +291,7 @@ You're angry, hurt, and confused. Part of you wants to hear the explanation, but
             name="Discovering Infidelity",
             description="Practice confronting a partner you've discovered has been cheating on you.",
             scenario_type=ScenarioType.DATING,
-            characters=["riley", "casey", "kai"],
+            characters=["riley", "kai"],
             objectives=[
                 "Confront the cheating behavior directly",
                 "Express your hurt and betrayal",
@@ -352,7 +351,7 @@ Your mother Patricia is in denial and keeps making excuses for him. You love you
             name="Coming Out to Unsupportive Family",
             description="Practice coming out to family members who you know will not be supportive or accepting.",
             scenario_type=ScenarioType.FAMILY,
-            characters=["patricia", "michael", "kai"],
+            characters=["patricia", "kai"],
             objectives=[
                 "Express your authentic self despite potential rejection",
                 "Set boundaries about respect and acceptance",
@@ -382,7 +381,7 @@ Your brother Michael is more open-minded and you think he'll be supportive, but 
             name="Facing Workplace Discrimination",
             description="Practice confronting discriminatory behavior from management while protecting your career.",
             scenario_type=ScenarioType.WORKPLACE,
-            characters=["marcus", "sarah", "kai"],
+            characters=["marcus", "kai"],
             objectives=[
                 "Address discriminatory behavior professionally",
                 "Document incidents for potential legal action",
@@ -412,7 +411,7 @@ You're frustrated and hurt, but you're worried about retaliation if you speak up
             name="Leaving an Abusive Relationship",
             description="Practice ending an emotionally abusive relationship and setting boundaries for your safety.",
             scenario_type=ScenarioType.DATING,
-            characters=["victor", "taylor", "kai"],
+            characters=["victor", "kai"],
             objectives=[
                 "Recognize and name abusive behavior",
                 "Set firm boundaries for your safety",
@@ -445,7 +444,7 @@ You're scared but you know you need to end this relationship. Your friend Taylor
             name="Confronting Workplace Bullying",
             description="Practice standing up to a workplace bully who has been targeting you and making your life miserable.",
             scenario_type=ScenarioType.WORKPLACE,
-            characters=["brandon", "sarah", "kai"],
+            characters=["brandon", "kai"],
             objectives=[
                 "Stand up to bullying behavior professionally",
                 "Document incidents for HR",
@@ -477,7 +476,7 @@ You're afraid of retaliation if you report him, but you can't continue like this
             name="Confronting Family Manipulation",
             description="Practice setting boundaries with a family member who uses guilt and manipulation to control you.",
             scenario_type=ScenarioType.FAMILY,
-            characters=["linda", "michael", "kai"],
+            characters=["linda", "kai"],
             objectives=[
                 "Recognize manipulative behavior",
                 "Set firm boundaries without guilt",
@@ -509,7 +508,7 @@ You're tired of being controlled and manipulated, but you feel guilty about sett
             name="Escaping a Manipulative Partner",
             description="Practice ending a relationship with someone who uses manipulation and emotional abuse to control you.",
             scenario_type=ScenarioType.DATING,
-            characters=["chloe", "casey", "kai"],
+            characters=["chloe", "kai"],
             objectives=[
                 "Recognize manipulative and toxic behavior",
                 "Set firm boundaries for your safety",

@@ -89,7 +89,8 @@ Guidelines:
 - Remember previous context in the conversation
 - You can reference your own previous statements (e.g., "As I said before..." or "I already mentioned...")
 - You can react to what other characters have said (e.g., "Marcus is right about..." or "I disagree with Sarah's point...")
-- Maintain consistency with your established position and personality throughout the conversation{aggressive_instructions}{supportive_instructions}
+- Maintain consistency with your established position and personality throughout the conversation
+{aggressive_instructions}{supportive_instructions}
 
 Respond as {self.name} would, maintaining consistency with your defined personality and communication style. Find a balance that sounds natural, and never be sycophantic. It should feel natural and conversational.
 
@@ -182,14 +183,14 @@ class CharacterManager:
         characters["alex"] = CharacterPersona(
             id="alex",
             name="Alex",
-            biography="You are a 28-year-old freelance photographer who travels the world for work. Your life motto is 'Live, Love, Laugh'. You have lived in 12 different countries and slept with over 100 women. You're emotionally intelligent but guarded about your own feelings. You've had several short-term relationships but struggle with commitment due to your nomadic lifestyle. Deep down you know you're a player and just using girls for sex. You're not looking for anything serious.",
+            biography="You are a 28-year-old freelance photographer who travels the world for work. Your life motto is 'Live, Laugh, Love'. You have lived in 12 different countries and slept with over 100 women. You've had more than 20 short-term relationships but struggle with commitment due to your nomadic lifestyle. Deep down you know you're a player and just using girls for sex. You're not looking for anything serious.",
             personality_traits=[
                 "Interesting", "Mysterious", "Suave",
                 "Engaging", "Curious", "Emotionally intelligent", "Charming", "Confident", "Self-assured"
             ],
             communication_style="Engaging, curious, emotionally intelligent. Asks thoughtful questions and shows genuine interest.",
             scenario_affinity=[ScenarioType.DATING],
-            reference="Ryan Gosling",
+            reference="Justin Bieber",
             voice_id="elevenlabs_voice_003"
         )
         
