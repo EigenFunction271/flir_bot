@@ -100,7 +100,14 @@ class GroqClient:
         try:
             # Use session reuse for better performance
             if not self.session or self.session.closed:
-                self.session = aiohttp.ClientSession()
+                # Create session with proper connector settings
+                connector = aiohttp.TCPConnector(
+                    limit=10,  # Limit total connections
+                    limit_per_host=5,  # Limit connections per host
+                    ttl_dns_cache=300,  # DNS cache TTL
+                    use_dns_cache=True,
+                )
+                self.session = aiohttp.ClientSession(connector=connector)
             
             async with self.session.post(
                 f"{self.base_url}/chat/completions",
@@ -231,7 +238,14 @@ class GroqClient:
         try:
             # Use session reuse for better performance
             if not self.session or self.session.closed:
-                self.session = aiohttp.ClientSession()
+                # Create session with proper connector settings
+                connector = aiohttp.TCPConnector(
+                    limit=10,  # Limit total connections
+                    limit_per_host=5,  # Limit connections per host
+                    ttl_dns_cache=300,  # DNS cache TTL
+                    use_dns_cache=True,
+                )
+                self.session = aiohttp.ClientSession(connector=connector)
             
             async with self.session.post(
                 f"{self.base_url}/chat/completions",
@@ -272,4 +286,6 @@ class GroqClient:
         """Close the HTTP session"""
         if self.session and not self.session.closed:
             await self.session.close()
+            # Wait a bit for connections to close properly
+            await asyncio.sleep(0.1)
             logger.info("✅ GroqClient session closed")

@@ -1701,15 +1701,27 @@ async def main():
                 bot.save_sessions()
                 logger.info("✅ Sessions saved successfully")
                 
-                # Close HTTP sessions
-                if hasattr(bot, 'groq_client'):
+                # Close HTTP sessions with proper cleanup
+                if hasattr(bot, 'groq_client') and bot.groq_client:
                     await bot.groq_client.close()
+                    logger.info("✅ GroqClient closed")
+                
+                if hasattr(bot, 'gemini_client') and bot.gemini_client:
+                    # Gemini client doesn't have HTTP sessions, but we can log it
+                    logger.info("✅ GeminiClient cleaned up")
                 
                 # Close bot connection
                 await bot.close()
                 logger.info("✅ Bot shutdown complete")
+                
+                # Give a moment for all connections to close
+                await asyncio.sleep(0.5)
+                
             except Exception as e:
                 logger.error(f"Error during shutdown: {e}")
+                # Force exit if graceful shutdown fails
+                import sys
+                sys.exit(1)
         
         # Register shutdown handler
         import signal

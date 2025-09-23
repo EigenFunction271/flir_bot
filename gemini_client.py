@@ -161,7 +161,7 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
             logger.debug(f"Raw Gemini response preview: {feedback_text[:200]}...")
             
             # Try to extract structured feedback (handles both JSON and malformed responses)
-            feedback_data = self._extract_structured_feedback(feedback_text)
+            feedback_data = self._extract_json_from_response(feedback_text)
             
             # Validate the extracted feedback
             if not self._validate_feedback_structure(feedback_data):
@@ -194,7 +194,7 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
         
         return "\n".join(formatted)
     
-    def _extract_structured_feedback(self, feedback_text: str) -> dict:
+    def _extract_json_from_response(self, feedback_text: str) -> dict:
         """
         Extract structured feedback from Gemini response with maximum flexibility.
         Handles both valid JSON and malformed responses by extracting field values directly.
