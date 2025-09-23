@@ -124,6 +124,8 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
             
             # Parse JSON response
             feedback_text = response.text.strip()
+            logger.info(f"Raw Gemini response length: {len(feedback_text)} characters")
+            logger.info(f"Raw Gemini response preview: {feedback_text[:200]}...")
             try:
                 import json
                 feedback_data = json.loads(feedback_text)
@@ -137,8 +139,9 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
                 return feedback_data
                 
             except (json.JSONDecodeError, ValueError) as json_error:
-                logger.warning(f"Failed to parse JSON feedback: {json_error}")
-                logger.warning(f"Raw response: {feedback_text}")
+                logger.error(f"JSON parsing failed: {json_error}")
+                logger.error(f"Raw response length: {len(feedback_text)}")
+                logger.error(f"Raw response: {repr(feedback_text)}")
                 # Fallback to structured text format
                 return self._create_fallback_feedback(feedback_text)
             
