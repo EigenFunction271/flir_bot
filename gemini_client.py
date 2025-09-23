@@ -124,6 +124,10 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
             
             # Parse JSON response
             feedback_text = response.text.strip()
+            
+            # Multi-stage JSON extraction for maximum flexibility
+            feedback_text = self._extract_json_from_response(feedback_text)
+            
             logger.info(f"Raw Gemini response length: {len(feedback_text)} characters")
             logger.info(f"Raw Gemini response preview: {feedback_text[:200]}...")
             try:
@@ -167,25 +171,97 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
         return "\n".join(formatted)
     
     def _create_fallback_feedback(self, feedback_text: str) -> dict:
-        """Create structured feedback from text when JSON parsing fails"""
-        logger.info("Creating fallback feedback structure from text response")
+        """Create structured feedback by extracting field values directly from malformed JSON"""
+        logger.info("Creating fallback feedback by extracting field values from response")
         
-        # Try to extract information from the text response
+        # Default fallback data
         fallback_data = {
-            "rating": "7/10",  # Default rating
+            "rating": "7/10",
             "overall_assessment": "Performance analysis completed. See detailed feedback below.",
             "strengths_text": "Communication skills demonstrated - You maintained a professional tone and attempted to address the situation constructively. Engagement with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Effort to address the situation - You made genuine attempts to understand and work through the scenario objectives.",
             "improvements_text": "Continue practicing assertiveness - Try being more direct about your needs and concerns. For example, instead of 'I think maybe we could...' try 'I need...' or 'I believe we should...'. Work on clear communication - Be more specific about your points and provide concrete examples. Avoid vague statements and focus on actionable solutions. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario.",
             "key_takeaways_text": "Practice active listening - When the other person speaks, acknowledge their points before responding. Try saying 'I understand that you feel...' or 'I hear that you're concerned about...'. Be more direct in communication - Use 'I' statements to express your needs clearly. Instead of 'Maybe we should consider...' try 'I need...' or 'I want...'. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
         }
         
-        # Try to extract rating if present
-        import re
-        rating_match = re.search(r'(\d+)/10', feedback_text)
-        if rating_match:
-            fallback_data["rating"] = rating_match.group(0)
+        # Extract field values directly from the response text
+        extracted_data = self._extract_field_values(feedback_text)
+        
+        # Use extracted values if found, otherwise keep defaults
+        for field, value in extracted_data.items():
+            if value and len(value.strip()) > 5:  # Only use if substantial content
+                fallback_data[field] = value
+                logger.info(f"Extracted {field}: {value[:50]}...")
         
         return fallback_data
+    
+    def _extract_field_values(self, text: str) -> dict:
+        """
+        Extract field values by finding field names and extracting quoted content.
+        Handles malformed JSON by looking for patterns like "field_name": "value"
+        """
+        import re
+        
+        extracted = {}
+        
+        # Define the fields we want to extract
+        fields = ["rating", "overall_assessment", "strengths_text", "improvements_text", "key_takeaways_text"]
+        
+        for field in fields:
+            # Special handling for rating field (might not be quoted)
+            if field == "rating":
+                # Try quoted first
+                pattern = rf'"{field}"\s*:\s*"([^"]*)"'
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    value = match.group(1)
+                    extracted[field] = value
+                else:
+                    # Try unquoted (common for ratings like "7/10")
+                    alt_pattern = rf'"{field}"\s*:\s*([^,}}\n]+)'
+                    match = re.search(alt_pattern, text, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip()
+                        # Clean up common rating formats
+                        value = re.sub(r'^["\']|["\']$', '', value)  # Remove surrounding quotes
+                        extracted[field] = value
+            else:
+                # Pattern to find field name followed by colon and quoted value
+                # Handles various spacing and formatting issues
+                pattern = rf'"{field}"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+                
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    value = match.group(1)
+                    # Clean up the extracted value
+                    value = self._clean_extracted_value(value)
+                    extracted[field] = value
+                else:
+                    # Try alternative pattern without quotes around field name
+                    alt_pattern = rf'{field}\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+                    match = re.search(alt_pattern, text, re.DOTALL | re.IGNORECASE)
+                    if match:
+                        value = match.group(1)
+                        value = self._clean_extracted_value(value)
+                        extracted[field] = value
+        
+        return extracted
+    
+    def _clean_extracted_value(self, value: str) -> str:
+        """Clean up extracted field values"""
+        if not value:
+            return ""
+        
+        # Unescape common escape sequences
+        value = value.replace('\\"', '"')  # Unescape quotes
+        value = value.replace('\\n', '\n')  # Convert \n to actual newlines
+        value = value.replace('\\t', '\t')  # Convert \t to actual tabs
+        value = value.replace('\\\\', '\\')  # Unescape backslashes
+        
+        # Remove excessive whitespace but preserve intentional formatting
+        value = re.sub(r'\n\s*\n', '\n\n', value)  # Normalize paragraph breaks
+        value = value.strip()
+        
+        return value
     
     async def test_connection(self) -> bool:
         """Test if the Gemini API connection is working"""
