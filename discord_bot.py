@@ -9,7 +9,6 @@ from aiohttp import web
 import threading
 import traceback
 from datetime import datetime, timedelta
-import pickle
 from pathlib import Path
 import re
 
@@ -57,7 +56,7 @@ class FlirBot(commands.Bot):
         
         # Active sessions with persistence
         self.active_sessions: Dict[int, Dict] = {}
-        self.session_file = Path("active_sessions.pkl")
+        self.session_file = Path("active_sessions.json")
         self.load_sessions()
         
         # Session timeout (30 minutes)
@@ -87,8 +86,15 @@ class FlirBot(commands.Bot):
                     self.active_sessions = {}
                     return
                 
-                with open(self.session_file, 'rb') as f:
-                    self.active_sessions = pickle.load(f)
+                with open(self.session_file, 'r', encoding='utf-8') as f:
+                    session_data = json.load(f)
+                    # Convert session data back to proper objects
+                    self.active_sessions = {}
+                    for user_id_str, session_dict in session_data.items():
+                        user_id = int(user_id_str)
+                        # Reconstruct session with proper object types
+                        session = self._reconstruct_session(session_dict)
+                        self.active_sessions[user_id] = session
                 
                 # Validate session structure
                 if not isinstance(self.active_sessions, dict):
@@ -118,7 +124,7 @@ class FlirBot(commands.Bot):
                 logger.info(f"✅ Loaded {len(self.active_sessions)} active sessions")
             else:
                 logger.info("No existing sessions found")
-        except (pickle.PickleError, EOFError, FileNotFoundError) as e:
+        except (json.JSONDecodeError, ValueError, FileNotFoundError) as e:
             logger.error(f"❌ Failed to load sessions (corrupted file): {e}")
             # Backup corrupted file
             if self.session_file.exists():
@@ -142,6 +148,114 @@ class FlirBot(commands.Bot):
         
         return (datetime.now() - created_at).total_seconds() > self.session_timeout
     
+    def _serialize_sessions_for_json(self) -> Dict[str, Dict]:
+        """Convert sessions to JSON-serializable format"""
+        json_sessions = {}
+        for user_id, session in self.active_sessions.items():
+            json_session = {
+                "scenario": {
+                    "id": session["scenario"].id,
+                    "name": session["scenario"].name,
+                    "description": session["scenario"].description,
+                    "scenario_type": session["scenario"].scenario_type.value,
+                    "characters": session["scenario"].characters,
+                    "objectives": session["scenario"].objectives,
+                    "context": session["scenario"].context,
+                    "difficulty": session["scenario"].difficulty,
+                    "character_roles": session["scenario"].character_roles
+                },
+                "characters": [
+                    {
+                        "id": char.id,
+                        "name": char.name,
+                        "biography": char.biography,
+                        "personality_traits": char.personality_traits,
+                        "communication_style": char.communication_style,
+                        "scenario_affinity": [affinity.value for affinity in char.scenario_affinity],
+                        "reference": char.reference,
+                        "voice_id": char.voice_id
+                    } for char in session["characters"]
+                ],
+                "context": session["context"],
+                "current_character": {
+                    "id": session["current_character"].id,
+                    "name": session["current_character"].name,
+                    "biography": session["current_character"].biography,
+                    "personality_traits": session["current_character"].personality_traits,
+                    "communication_style": session["current_character"].communication_style,
+                    "scenario_affinity": [affinity.value for affinity in session["current_character"].scenario_affinity],
+                    "reference": session["current_character"].reference,
+                    "voice_id": session["current_character"].voice_id
+                } if session["current_character"] else None,
+                "conversation_history": session["conversation_history"],
+                "turn_count": session["turn_count"],
+                "created_at": session["created_at"].isoformat() if isinstance(session["created_at"], datetime) else session["created_at"]
+            }
+            json_sessions[str(user_id)] = json_session
+        return json_sessions
+    
+    def _reconstruct_session(self, session_dict: Dict) -> Dict:
+        """Reconstruct session objects from JSON data"""
+        from characters import CharacterPersona, ScenarioType
+        from scenarios import Scenario
+        
+        # Reconstruct scenario
+        scenario_data = session_dict["scenario"]
+        scenario = Scenario(
+            id=scenario_data["id"],
+            name=scenario_data["name"],
+            description=scenario_data["description"],
+            scenario_type=ScenarioType(scenario_data["scenario_type"]),
+            characters=scenario_data["characters"],
+            objectives=scenario_data["objectives"],
+            context=scenario_data["context"],
+            difficulty=scenario_data["difficulty"],
+            character_roles=scenario_data.get("character_roles")
+        )
+        
+        # Reconstruct characters
+        characters = []
+        for char_data in session_dict["characters"]:
+            character = CharacterPersona(
+                id=char_data["id"],
+                name=char_data["name"],
+                biography=char_data["biography"],
+                personality_traits=char_data["personality_traits"],
+                communication_style=char_data["communication_style"],
+                scenario_affinity=[ScenarioType(affinity) for affinity in char_data["scenario_affinity"]],
+                reference=char_data.get("reference"),
+                voice_id=char_data.get("voice_id")
+            )
+            characters.append(character)
+        
+        # Reconstruct current character
+        current_character = None
+        if session_dict["current_character"]:
+            char_data = session_dict["current_character"]
+            current_character = CharacterPersona(
+                id=char_data["id"],
+                name=char_data["name"],
+                biography=char_data["biography"],
+                personality_traits=char_data["personality_traits"],
+                communication_style=char_data["communication_style"],
+                scenario_affinity=[ScenarioType(affinity) for affinity in char_data["scenario_affinity"]],
+                reference=char_data.get("reference"),
+                voice_id=char_data.get("voice_id")
+            )
+        
+        # Reconstruct session
+        session = {
+            "scenario": scenario,
+            "characters": characters,
+            "context": session_dict["context"],
+            "current_character": current_character,
+            "conversation_history": session_dict["conversation_history"],
+            "turn_count": session_dict["turn_count"],
+            "created_at": datetime.fromisoformat(session_dict["created_at"]) if isinstance(session_dict["created_at"], str) else session_dict["created_at"]
+        }
+        
+        return session
+    
     def save_sessions(self):
         """Save active sessions to disk"""
         try:
@@ -152,8 +266,10 @@ class FlirBot(commands.Bot):
             
             # Save to temporary file first, then rename (atomic operation)
             temp_file = self.session_file.with_suffix('.tmp')
-            with open(temp_file, 'wb') as f:
-                pickle.dump(self.active_sessions, f)
+            # Convert sessions to JSON-serializable format
+            json_sessions = self._serialize_sessions_for_json()
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(json_sessions, f, indent=2, ensure_ascii=False)
             
             # Atomic rename
             temp_file.rename(self.session_file)
@@ -212,16 +328,64 @@ class FlirBot(commands.Bot):
         if len(message.strip()) < 1:
             return False, "Message must contain at least one character"
         
-        # Basic content filtering
+        # Check for excessive whitespace or repeated characters
+        if len(message.strip()) < 2:
+            return False, "Message must contain at least 2 meaningful characters"
+        
+        # Check for excessive repetition (spam detection)
+        if len(set(message.strip())) < 3 and len(message.strip()) > 10:
+            return False, "Message appears to be spam (too many repeated characters)"
+        
+        # Enhanced content filtering
         dangerous_patterns = [
             r'<script.*?>',  # Script tags
             r'javascript:',  # JavaScript URLs
             r'data:text/html',  # Data URLs
+            r'vbscript:',  # VBScript URLs
+            r'onload\s*=',  # Event handlers
+            r'onerror\s*=',  # Event handlers
+            r'onclick\s*=',  # Event handlers
+            r'<iframe.*?>',  # Iframe tags
+            r'<object.*?>',  # Object tags
+            r'<embed.*?>',  # Embed tags
+            r'<link.*?>',  # Link tags
+            r'<meta.*?>',  # Meta tags
+            r'<style.*?>',  # Style tags
+            r'@everyone',  # Discord mentions
+            r'@here',  # Discord mentions
+            r'<@!?\d+>',  # User mentions
+            r'<#\d+>',  # Channel mentions
+            r'<@&\d+>',  # Role mentions
         ]
         
         for pattern in dangerous_patterns:
             if re.search(pattern, message, re.IGNORECASE):
                 return False, "Message contains potentially unsafe content"
+        
+        # Check for excessive special characters (potential obfuscation)
+        special_char_count = len(re.findall(r'[^\w\s]', message))
+        if special_char_count > len(message) * 0.5:  # More than 50% special chars
+            return False, "Message contains too many special characters"
+        
+        # Check for potential command injection
+        command_patterns = [
+            r'![\w]+',  # Bot commands
+            r'/\w+',  # Slash commands
+            r'\.\w+\s*\(',  # Function calls
+        ]
+        
+        for pattern in command_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return False, "Message appears to contain commands"
+        
+        # Check for excessive capitalization (shouting)
+        if len(re.findall(r'[A-Z]', message)) > len(message) * 0.7:  # More than 70% caps
+            return False, "Please avoid excessive capitalization"
+        
+        # Check for excessive punctuation
+        punctuation_count = len(re.findall(r'[!?]{3,}', message))  # 3+ consecutive ! or ?
+        if punctuation_count > 0:
+            return False, "Please avoid excessive punctuation"
         
         return True, ""
     
@@ -439,10 +603,14 @@ class FlirBot(commands.Bot):
         else:
             return "You are the person practicing social skills in this challenging scenario"
     
-    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, objectives: List[str], scenario_context: str = None, user_role_description: str = None) -> str:
+    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, objectives: List[str], scenario_context: str = None, user_role_description: str = None) -> dict:
         """Generate feedback with fallback mechanisms"""
+        logger.info(f"Starting feedback generation for scenario '{scenario_name}' with character '{character_name}'")
+        logger.info(f"Conversation history: {len(conversation_history)} messages, Objectives: {objectives}")
+        
         try:
             # Try Gemini first
+            logger.info("Attempting feedback generation with Gemini")
             feedback = await self.gemini_client.generate_feedback(
                 conversation_history=conversation_history,
                 scenario_name=scenario_name,
@@ -451,9 +619,11 @@ class FlirBot(commands.Bot):
                 scenario_context=scenario_context,
                 user_role_description=user_role_description
             )
+            logger.info("Successfully generated feedback with Gemini")
             return feedback
         except Exception as e:
-            logger.warning(f"Gemini feedback generation failed: {e}")
+            logger.warning(f"Gemini feedback generation failed for scenario '{scenario_name}': {e}")
+            logger.warning(f"Falling back to Groq for feedback generation")
             
             # Fallback to Groq
             try:
@@ -474,15 +644,18 @@ Give feedback on:
 
 Keep it constructive and specific."""
                 
+                logger.info("Generating feedback with Groq fallback")
                 feedback = await self.groq_client.generate_response(
                     user_message=feedback_prompt,
                     system_prompt="You are a social skills coach providing constructive feedback.",
                     model_type="fast"
                 )
+                logger.info("Successfully generated feedback with Groq, converting to structured format")
                 # Convert text feedback to structured format
                 return self._convert_text_to_structured_feedback(feedback, scenario_name, character_name)
             except Exception as e2:
-                logger.error(f"Groq fallback also failed: {e2}")
+                logger.error(f"Groq fallback also failed for scenario '{scenario_name}': {e2}")
+                logger.error(f"Using basic feedback as final fallback")
                 
                 # Final fallback - basic feedback
                 return self._generate_basic_feedback(conversation_history, scenario_name, character_name)
@@ -503,77 +676,32 @@ Keep it constructive and specific."""
         return "\n".join(formatted)
     
     def _convert_text_to_structured_feedback(self, text_feedback: str, scenario_name: str, character_name: str) -> dict:
-        """Convert text feedback to structured format"""
+        """Convert text feedback to structured format with simplified parsing"""
         import re
+        
+        logger.info(f"Converting text feedback to structured format for scenario '{scenario_name}'")
+        logger.debug(f"Text feedback length: {len(text_feedback)} characters")
         
         # Try to extract rating
         rating_match = re.search(r'(\d+)/10', text_feedback)
         rating = rating_match.group(0) if rating_match else "7/10"
+        logger.info(f"Extracted rating: {rating}")
         
-        # Try to extract sections from text
-        strengths_text = ""
-        improvements_text = ""
-        takeaways_text = ""
+        # Simplified section extraction using regex patterns
+        sections = {
+            'strengths': self._extract_section_content(text_feedback, ['strength', 'good', 'well', 'positive', 'excellent']),
+            'improvements': self._extract_section_content(text_feedback, ['improvement', 'better', 'could', 'should', 'work on']),
+            'takeaways': self._extract_section_content(text_feedback, ['takeaway', 'tip', 'next time', 'remember', 'future'])
+        }
         
-        # Simple text parsing to extract sections
-        lines = text_feedback.split('\n')
-        current_section = None
-        current_content = []
+        # Use extracted content or fallback
+        strengths_text = sections['strengths'] or "Engaged with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Showed effort in communication - You maintained a professional tone and attempted to address the situation constructively. Attempted to address the situation - You made genuine attempts to understand and work through the scenario objectives."
         
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            if 'strength' in line.lower() or 'good' in line.lower() or 'well' in line.lower():
-                if current_section and current_content:
-                    if current_section == 'strengths':
-                        strengths_text = ' '.join(current_content)
-                    elif current_section == 'improvements':
-                        improvements_text = ' '.join(current_content)
-                    elif current_section == 'takeaways':
-                        takeaways_text = ' '.join(current_content)
-                current_section = 'strengths'
-                current_content = []
-            elif 'improvement' in line.lower() or 'better' in line.lower() or 'could' in line.lower():
-                if current_section and current_content:
-                    if current_section == 'strengths':
-                        strengths_text = ' '.join(current_content)
-                    elif current_section == 'improvements':
-                        improvements_text = ' '.join(current_content)
-                    elif current_section == 'takeaways':
-                        takeaways_text = ' '.join(current_content)
-                current_section = 'improvements'
-                current_content = []
-            elif 'takeaway' in line.lower() or 'tip' in line.lower() or 'next' in line.lower():
-                if current_section and current_content:
-                    if current_section == 'strengths':
-                        strengths_text = ' '.join(current_content)
-                    elif current_section == 'improvements':
-                        improvements_text = ' '.join(current_content)
-                    elif current_section == 'takeaways':
-                        takeaways_text = ' '.join(current_content)
-                current_section = 'takeaways'
-                current_content = []
-            else:
-                current_content.append(line)
+        improvements_text = sections['improvements'] or "Continue practicing assertiveness - Try being more direct about your needs and concerns. Work on clear communication - Be more specific about your points and provide concrete examples. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario."
         
-        # Handle the last section
-        if current_section and current_content:
-            if current_section == 'strengths':
-                strengths_text = ' '.join(current_content)
-            elif current_section == 'improvements':
-                improvements_text = ' '.join(current_content)
-            elif current_section == 'takeaways':
-                takeaways_text = ' '.join(current_content)
+        takeaways_text = sections['takeaways'] or "Practice active listening - When the other person speaks, acknowledge their points before responding. Be more direct in communication - Use 'I' statements to express your needs clearly. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
         
-        # Fallback if no sections found
-        if not strengths_text:
-            strengths_text = "Engaged with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Showed effort in communication - You maintained a professional tone and attempted to address the situation constructively. Attempted to address the situation - You made genuine attempts to understand and work through the scenario objectives."
-        if not improvements_text:
-            improvements_text = "Continue practicing assertiveness - Try being more direct about your needs and concerns. Work on clear communication - Be more specific about your points and provide concrete examples. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario."
-        if not takeaways_text:
-            takeaways_text = "Practice active listening - When the other person speaks, acknowledge their points before responding. Be more direct in communication - Use 'I' statements to express your needs clearly. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
+        logger.info(f"Text conversion completed - extracted {sum(1 for v in sections.values() if v)}/3 sections")
         
         return {
             "rating": rating,
@@ -582,6 +710,38 @@ Keep it constructive and specific."""
             "improvements_text": improvements_text,
             "key_takeaways_text": takeaways_text
         }
+    
+    def _extract_section_content(self, text: str, keywords: list) -> str:
+        """Extract content for a specific section using keyword matching"""
+        import re
+        
+        # Find lines containing keywords
+        lines = text.split('\n')
+        relevant_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if line contains any of the keywords
+            if any(keyword in line.lower() for keyword in keywords):
+                # Extract content after the keyword
+                for keyword in keywords:
+                    if keyword in line.lower():
+                        # Find the position of the keyword and extract content after it
+                        keyword_pos = line.lower().find(keyword)
+                        if keyword_pos != -1:
+                            content = line[keyword_pos + len(keyword):].strip()
+                            if content:
+                                relevant_lines.append(content)
+                        break
+        
+        # If we found relevant lines, join them
+        if relevant_lines:
+            return ' '.join(relevant_lines)
+        
+        return ""
     
     def _generate_basic_feedback(self, conversation_history: List[Dict], scenario_name: str, character_name: str) -> dict:
         """Generate basic feedback when all AI services fail"""
@@ -1423,31 +1583,31 @@ This is the start of a social skills training conversation. Be true to your char
                     continue
                     
         except Exception as e:
-                logger.error(f"Error in multi-character response generation: {e}")
-                # Fallback to single character response
-                current_char = session.get("current_character")
-                if current_char:
-                    character_role_context = session["scenario"].get_character_role_context(current_char.id)
-                    response = await self._generate_character_response_with_fallback(
-                        user_message, current_char, session["conversation_history"], session["scenario"].context, character_role_context
-                    )
-                    
-                    session["conversation_history"].append({
-                        "role": "assistant",
-                        "content": response,
-                        "character": current_char.name
-                    })
-                    
-                    embed = discord.Embed(
-                        title=f"💬 {current_char.name}",
-                        description=response,
-                        color=0x0099ff
-                    )
-                    
-                    turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
-                    
-                    await channel.send(embed=embed)
+            logger.error(f"Error in multi-character response generation: {e}")
+            # Fallback to single character response
+            current_char = session.get("current_character")
+            if current_char:
+                character_role_context = session["scenario"].get_character_role_context(current_char.id)
+                response = await self._generate_character_response_with_fallback(
+                    user_message, current_char, session["conversation_history"], session["scenario"].context, character_role_context
+                )
+                
+                session["conversation_history"].append({
+                    "role": "assistant",
+                    "content": response,
+                    "character": current_char.name
+                })
+                
+                embed = discord.Embed(
+                    title=f"💬 {current_char.name}",
+                    description=response,
+                    color=0x0099ff
+                )
+                
+                turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
+                embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                
+                await channel.send(embed=embed)
 
 async def health_check(request):
     """Health check endpoint for Render with error boundaries"""
