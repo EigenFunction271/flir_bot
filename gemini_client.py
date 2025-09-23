@@ -204,6 +204,9 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
         # Get default fallback data
         fallback_data = self._get_fallback_feedback_data()
         
+        # Define required fields at function scope
+        required_fields = ["rating", "overall_assessment", "strengths_text", "improvements_text", "key_takeaways_text"]
+        
         # Step 1: Try to clean and parse as JSON first
         cleaned_text = self._clean_response_text(feedback_text)
         
@@ -211,7 +214,6 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
             feedback_data = json.loads(cleaned_text)
             
             # Validate required fields
-            required_fields = ["rating", "overall_assessment", "strengths_text", "improvements_text", "key_takeaways_text"]
             missing_fields = []
             for field in required_fields:
                 if field not in feedback_data:

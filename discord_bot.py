@@ -1714,8 +1714,12 @@ async def main():
                 await bot.close()
                 logger.info("✅ Bot shutdown complete")
                 
-                # Give a moment for all connections to close
-                await asyncio.sleep(0.5)
+                # Give more time for all connections to close properly
+                await asyncio.sleep(1.0)
+                
+                # Force cleanup of any remaining connections
+                import gc
+                gc.collect()
                 
             except Exception as e:
                 logger.error(f"Error during shutdown: {e}")

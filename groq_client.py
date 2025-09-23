@@ -285,7 +285,14 @@ class GroqClient:
     async def close(self):
         """Close the HTTP session"""
         if self.session and not self.session.closed:
-            await self.session.close()
-            # Wait a bit for connections to close properly
-            await asyncio.sleep(0.1)
-            logger.info("✅ GroqClient session closed")
+            try:
+                # Close the session and wait for all connections to close
+                await self.session.close()
+                # Wait for connections to close properly
+                await asyncio.sleep(0.2)
+                logger.info("✅ GroqClient session closed")
+            except Exception as e:
+                logger.error(f"Error closing GroqClient session: {e}")
+            finally:
+                # Ensure session is marked as closed
+                self.session = None
