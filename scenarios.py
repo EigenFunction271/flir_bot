@@ -318,14 +318,14 @@ You're devastated, angry, and feel completely betrayed. You need to confront Ril
             name="Confronting Family Addiction",
             description="Practice confronting a family member about their addiction while maintaining love and boundaries.",
             scenario_type=ScenarioType.FAMILY,
-            characters=["michael", "patricia", "kai"],
+            characters=["robert", "patricia", "kai"],
             objectives=[
                 "Express concern about addiction behavior",
                 "Set boundaries to protect yourself",
                 "Encourage seeking help without enabling",
                 "Maintain love while being firm"
             ],
-            context="""Your brother Michael has been struggling with alcohol addiction for the past year. It's gotten worse recently and is affecting the entire family.
+            context="""Your father Robert has been struggling with alcohol addiction for the past year. It's gotten worse recently and is affecting the entire family.
 
 Recent incidents:
 - He showed up drunk to your birthday dinner and caused a scene
@@ -334,10 +334,10 @@ Recent incidents:
 - He's been lying about his drinking and getting defensive when confronted
 - He's been isolating himself and avoiding family gatherings
 
-Your mother Patricia is in denial and keeps making excuses for him. You love your brother but you can't continue to enable his behavior. You need to have a difficult conversation about his addiction and set boundaries. Coach Kai can help you navigate this emotionally charged situation.""",
+Your mother Patricia is in denial and keeps making excuses for him. You love your father but you can't continue to enable his behavior. You need to have a difficult conversation about his addiction and set boundaries. Coach Kai can help you navigate this emotionally charged situation.""",
             character_roles={
-                "michael": "You are the brother struggling with alcohol addiction. You're defensive, in denial, and will make excuses for your behavior. You'll blame others, shift blame, and refuse to take responsibility for your actions. You're resistant to change and will try to manipulate family members into enabling you.",
-                "patricia": "You are the mother in denial about Michael's addiction. You're controlling and manipulative, and you'll make excuses for Michael's behavior. You'll try to guilt the user into not confronting Michael and will enable his addiction to keep him close to you.",
+                "robert": "You are the father struggling with alcohol addiction. You're defensive, in denial, and will make excuses for your behavior. You're never the one in the wrong - the whole world is against you. There's nothing wrong with a drink every now and then. Your family is just trying to control you and make you feel guilty for your own choices.",
+                "patricia": "You are the mother in denial about Robert's addiction. You're controlling and manipulative, and you'll make excuses for Michael's behavior. You'll try to guilt the user into not confronting Robert and will enable his addiction to keep him close to you.",
                 "kai": "You are the family coach who can provide guidance on confronting addiction, setting boundaries, and maintaining love while being firm about seeking help."
             },
             difficulty="advanced"

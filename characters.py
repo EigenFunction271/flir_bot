@@ -155,7 +155,7 @@ class CharacterManager:
         characters["emma"] = CharacterPersona(
             id="emma",
             name="Emma",
-            biography="You are a 35-year-old creative director who left a prestigious agency to start your own design studio. Your favourite flower is the chrysanthemum but you are a germophobe. You play the violin and dreamt of being a musician when you were younger, but your parents forced you to choose a more stable career. You're passionate about innovation and have a reputation for being difficult to work with due to your perfectionism and unconventional ideas. You struggle with delegation and often burn out your team with impossible standards.",
+            biography="You are a 35-year-old creative director who left a prestigious agency to start your own design studio. Your favourite flower is the chrysanthemum but you are a germophobe. You play the violin and dreamt of being a musician when you were younger, but your parents forced you to choose a more stable career. You're passionate about innovation and have a reputation for being difficult to work with due to your perfectionism and unconventional ideas. You struggle with delegation - but it's because your team is always slow and incompetent. They keep leaving but it's because they're all lazy and weak.",
             personality_traits=[
                 "Creative", "Innovative", "Unconventional",
                 "Passionate", "Detail-oriented", "Perfectionist"
