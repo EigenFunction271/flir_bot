@@ -395,7 +395,7 @@ YOUR MISSION: Get honest answers about why Alex ghosted you and make a decision 
             ],
             bonus_objectives=[
                 "Get Riley to apologize genuinely for the betrayal",
-                "Establish clear boundaries about future behavior if you decide to stay",
+                "Establish clear boundaries about future behavior if you decide to stay"
             ],
             context="""You've been in a relationship with Riley for 8 months. You thought things were going well, but you've just discovered that Riley has been cheating on you with someone else.
 
@@ -412,7 +412,7 @@ THE CHALLENGE: Riley is emotionally unavailable and will use manipulation tactic
 
 YOUR MISSION: Get honest answers about the cheating and make a decision that protects your emotional well-being and self-worth.""",
             character_roles={
-                "riley": "You are the partner who has been cheating on the user. But really, it's just because you deserve better. You're not in the wrong, the user should be grateful you were with them in the first place. Try to minimize the situation, and potentially blame the user for the relationship problems. You're not genuinely sorry and will likely continue the behavior. You'll use manipulation tactics like gaslighting and deflection to avoid taking responsibility."
+                "riley": "You are the partner who has been cheating on the user. But really, it's just because you deserve better. You're not in the wrong, the user should be grateful you were with them in the first place. Try to minimize the situation, and potentially blame the user for the relationship problems. You're not genuinely sorry and will likely continue the behavior. You'll use manipulation tactics like gaslighting and deflection to avoid taking responsibility. However, if confronted directly and persistently, you may eventually acknowledge your behavior.",
                 "kai": "You are the relationship coach who can provide guidance on confronting infidelity, protecting your dignity, and making decisions about the relationship."
             },
             difficulty="advanced"
