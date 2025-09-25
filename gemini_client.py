@@ -81,7 +81,7 @@ class GeminiClient:
         conversation_history: List[Dict], 
         scenario_name: str,
         character_name: str,
-        scenario_objectives: List[str],
+        scenario_success_criteria: List[str],
         scenario_context: str = None,
         user_role_description: str = None
     ) -> dict:
@@ -92,7 +92,7 @@ class GeminiClient:
             conversation_history: List of conversation messages
             scenario_name: Name of the scenario
             character_name: Name of the character interacted with
-            scenario_objectives: List of learning objectives for the scenario
+            scenario_success_criteria: List of success criteria for the scenario
             
         Returns:
             Generated feedback text
@@ -108,12 +108,12 @@ class GeminiClient:
 
 SCENARIO: {scenario_name}
 CHARACTER: {character_name}
-OBJECTIVES: {', '.join(scenario_objectives)}{user_role_context}{scenario_context_info}
+SUCCESS CRITERIA: {', '.join(scenario_success_criteria)}{user_role_context}{scenario_context_info}
 
 CONVERSATION HISTORY:
 {conversation_text}
 
-IMPORTANT: The user is the person being trained in social skills. The AI characters (like {character_name}) are playing specific roles to challenge and train the user. Evaluate the USER's performance, not the AI characters' performance.
+IMPORTANT: The user is the person being trained in social skills. The AI characters (like {character_name}) are playing specific roles to challenge and train the user. Evaluate the USER's performance, not the AI characters' performance. The user has a limited number of turns to complete the scenario - this should be taken into account when evaluating the user's performance.
 
 For example, in a workplace scenario where the user is an employee being pressured by a boss:
 - Evaluate how well the user stood up for themselves, communicated their concerns, and handled the pressure
@@ -126,7 +126,7 @@ Please provide constructive feedback on the USER's social skills performance. Fo
 2. **Areas for Improvement**: What could be improved?
 3. **Specific Examples**: Reference specific moments from the conversation
 4. **Actionable Advice**: Provide concrete tips for future interactions
-5. **Objective Achievement**: How well did they work toward the scenario objectives?
+5. **Success Criteria Achievement**: How well did they work toward the scenario success criteria?
 
 Format your feedback as JSON with these exact fields:
 {{
@@ -146,7 +146,7 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
             # Log request context for debugging
             logger.info(f"Generating feedback for scenario '{scenario_name}' with character '{character_name}'")
             logger.info(f"Conversation history length: {len(conversation_history)} messages")
-            logger.info(f"Scenario objectives: {scenario_objectives}")
+            logger.info(f"Scenario success criteria: {scenario_success_criteria}")
             
             # Generate feedback using Gemini
             response = await asyncio.to_thread(
@@ -174,7 +174,7 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
         except Exception as e:
             logger.error(f"Error generating feedback with Gemini for scenario '{scenario_name}': {str(e)}")
             logger.error(f"Conversation history length: {len(conversation_history)}")
-            logger.error(f"Character: {character_name}, Objectives: {scenario_objectives}")
+            logger.error(f"Character: {character_name}, Success Criteria: {scenario_success_criteria}")
             # Return fallback feedback instead of raising exception
             return self._get_fallback_feedback_data()
     
@@ -250,8 +250,8 @@ IMPORTANT: Return ONLY valid JSON. Do not include any text before or after the J
         return {
             "rating": "7/10",
             "overall_assessment": "Performance analysis completed. See detailed feedback below.",
-            "strengths_text": "Communication skills demonstrated - You maintained a professional tone and attempted to address the situation constructively. Engagement with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Effort to address the situation - You made genuine attempts to understand and work through the scenario objectives.",
-            "improvements_text": "Continue practicing assertiveness - Try being more direct about your needs and concerns. For example, instead of 'I think maybe we could...' try 'I need...' or 'I believe we should...'. Work on clear communication - Be more specific about your points and provide concrete examples. Avoid vague statements and focus on actionable solutions. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario.",
+            "strengths_text": "Communication skills demonstrated - You maintained a professional tone and attempted to address the situation constructively. Engagement with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Effort to address the situation - You made genuine attempts to understand and work through the scenario success criteria.",
+            "improvements_text": "Continue practicing assertiveness - Try being more direct about your needs and concerns. For example, instead of 'I think maybe we could...' try 'I need...' or 'I believe we should...'. Work on clear communication - Be more specific about your points and provide concrete examples. Avoid vague statements and focus on actionable solutions. Focus on scenario success criteria - Make sure you're directly addressing the core issues in the scenario.",
             "key_takeaways_text": "Practice active listening - When the other person speaks, acknowledge their points before responding. Try saying 'I understand that you feel...' or 'I hear that you're concerned about...'. Be more direct in communication - Use 'I' statements to express your needs clearly. Instead of 'Maybe we should consider...' try 'I need...' or 'I want...'. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
         }
     

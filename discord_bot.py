@@ -159,7 +159,9 @@ class FlirBot(commands.Bot):
                     "description": session["scenario"].description,
                     "scenario_type": session["scenario"].scenario_type.value,
                     "characters": session["scenario"].characters,
-                    "objectives": session["scenario"].objectives,
+                    "primary_goal": session["scenario"].primary_goal,
+                    "success_criteria": session["scenario"].success_criteria,
+                    "bonus_objectives": session["scenario"].bonus_objectives,
                     "context": session["scenario"].context,
                     "difficulty": session["scenario"].difficulty,
                     "character_roles": session["scenario"].character_roles
@@ -207,7 +209,9 @@ class FlirBot(commands.Bot):
             description=scenario_data["description"],
             scenario_type=ScenarioType(scenario_data["scenario_type"]),
             characters=scenario_data["characters"],
-            objectives=scenario_data["objectives"],
+            primary_goal=scenario_data["primary_goal"],
+            success_criteria=scenario_data["success_criteria"],
+            bonus_objectives=scenario_data.get("bonus_objectives"),
             context=scenario_data["context"],
             difficulty=scenario_data["difficulty"],
             character_roles=scenario_data.get("character_roles")
@@ -471,7 +475,7 @@ class FlirBot(commands.Bot):
                 session["conversation_history"],
                 session["scenario"].name,
                 character_name,
-                session["scenario"].objectives,
+                session["scenario"].success_criteria,
                 session["scenario"].context,
                 self._get_user_role_description(session["scenario"])
             )
@@ -603,10 +607,10 @@ class FlirBot(commands.Bot):
         else:
             return "You are the person practicing social skills in this challenging scenario"
     
-    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, objectives: List[str], scenario_context: str = None, user_role_description: str = None) -> dict:
+    async def _generate_feedback_with_fallback(self, conversation_history: List[Dict], scenario_name: str, character_name: str, success_criteria: List[str], scenario_context: str = None, user_role_description: str = None) -> dict:
         """Generate feedback with fallback mechanisms"""
         logger.info(f"Starting feedback generation for scenario '{scenario_name}' with character '{character_name}'")
-        logger.info(f"Conversation history: {len(conversation_history)} messages, Objectives: {objectives}")
+        logger.info(f"Conversation history: {len(conversation_history)} messages, Success Criteria: {success_criteria}")
         
         try:
             # Try Gemini first
@@ -615,7 +619,7 @@ class FlirBot(commands.Bot):
                 conversation_history=conversation_history,
                 scenario_name=scenario_name,
                 character_name=character_name,
-                scenario_objectives=objectives,
+                scenario_success_criteria=success_criteria,
                 scenario_context=scenario_context,
                 user_role_description=user_role_description
             )
@@ -631,7 +635,7 @@ class FlirBot(commands.Bot):
 
 Scenario: {scenario_name}
 Character: {character_name}
-Objectives: {', '.join(objectives)}
+Success Criteria: {', '.join(success_criteria)}
 
 Conversation:
 {self._format_conversation_for_feedback(conversation_history)}
@@ -695,9 +699,9 @@ Keep it constructive and specific."""
         }
         
         # Use extracted content or fallback
-        strengths_text = sections['strengths'] or "Engaged with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Showed effort in communication - You maintained a professional tone and attempted to address the situation constructively. Attempted to address the situation - You made genuine attempts to understand and work through the scenario objectives."
+        strengths_text = sections['strengths'] or "Engaged with the scenario - You actively participated and showed interest in resolving the conflict or challenge presented. Showed effort in communication - You maintained a professional tone and attempted to address the situation constructively. Attempted to address the situation - You made genuine attempts to understand and work through the scenario success criteria."
         
-        improvements_text = sections['improvements'] or "Continue practicing assertiveness - Try being more direct about your needs and concerns. Work on clear communication - Be more specific about your points and provide concrete examples. Focus on scenario objectives - Make sure you're directly addressing the core issues in the scenario."
+        improvements_text = sections['improvements'] or "Continue practicing assertiveness - Try being more direct about your needs and concerns. Work on clear communication - Be more specific about your points and provide concrete examples. Focus on scenario success criteria - Make sure you're directly addressing the core issues in the scenario."
         
         takeaways_text = sections['takeaways'] or "Practice active listening - When the other person speaks, acknowledge their points before responding. Be more direct in communication - Use 'I' statements to express your needs clearly. Set clear boundaries - When someone is being unreasonable, practice saying 'I'm not comfortable with that' or 'That doesn't work for me' followed by your alternative suggestion."
         
@@ -1001,10 +1005,23 @@ Keep it constructive and specific."""
             )
             
             embed.add_field(
-                name="🎯 Objectives",
-                value="\n".join(f"• {obj}" for obj in scenario.objectives),
+                name="🎯 Primary Goal",
+                value=scenario.primary_goal,
                 inline=False
             )
+            
+            embed.add_field(
+                name="✅ Success Criteria",
+                value="\n".join(f"• {criteria}" for criteria in scenario.success_criteria),
+                inline=False
+            )
+            
+            if scenario.bonus_objectives:
+                embed.add_field(
+                    name="🏆 Bonus Objectives",
+                    value="\n".join(f"• {obj}" for obj in scenario.bonus_objectives),
+                    inline=False
+                )
             
             embed.add_field(
                 name="👥 Characters",
@@ -1137,10 +1154,23 @@ Keep it constructive and specific."""
             )
             
             embed.add_field(
-                name="🎯 Objectives",
-                value="\n".join(f"• {obj}" for obj in scenario.objectives),
+                name="🎯 Primary Goal",
+                value=scenario.primary_goal,
                 inline=False
             )
+            
+            embed.add_field(
+                name="✅ Success Criteria",
+                value="\n".join(f"• {criteria}" for criteria in scenario.success_criteria),
+                inline=False
+            )
+            
+            if scenario.bonus_objectives:
+                embed.add_field(
+                    name="🏆 Bonus Objectives",
+                    value="\n".join(f"• {obj}" for obj in scenario.bonus_objectives),
+                    inline=False
+                )
             
             embed.add_field(
                 name="👤 Key Character",

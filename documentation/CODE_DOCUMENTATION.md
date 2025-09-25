@@ -218,7 +218,9 @@ class Scenario:
     description: str
     scenario_type: ScenarioType
     characters: List[str]  # Character IDs
-    objectives: List[str]
+    primary_goal: str  # Single, clear main objective
+    success_criteria: List[str]  # Specific, measurable outcomes
+    bonus_objectives: List[str] = None  # Optional advanced goals
     context: str
     difficulty: str  # "beginner", "intermediate", "advanced"
     character_roles: Dict[str, str] = None
@@ -296,7 +298,7 @@ async def generate_feedback(
     conversation_history: List[Dict], 
     scenario_name: str,
     character_name: str,
-    scenario_objectives: List[str],
+    scenario_success_criteria: List[str],
     scenario_context: str = None,
     user_role_description: str = None
 ) -> dict:

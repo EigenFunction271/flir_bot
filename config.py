@@ -40,7 +40,7 @@ class Config:
     DEFAULT_TEMPERATURE = 0.7
     
     # Conversation Configuration
-    MAX_CONVERSATION_TURNS = 3
+    MAX_CONVERSATION_TURNS = 5
     
     @classmethod
     def validate(cls):
