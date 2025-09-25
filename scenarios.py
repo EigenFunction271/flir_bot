@@ -13,9 +13,9 @@ class Scenario:
     characters: List[str]  # Character IDs
     primary_goal: str  # Single, clear main objective
     success_criteria: List[str]  # Specific, measurable outcomes
-    bonus_objectives: List[str] = None  # Optional advanced goals
     context: str
     difficulty: str  # "beginner", "intermediate", "advanced"
+    bonus_objectives: List[str] = None  # Optional advanced goals
     character_roles: Dict[str, str] = None  # Character ID -> Role description
     
     # Backward compatibility
