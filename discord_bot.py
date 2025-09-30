@@ -1203,6 +1203,8 @@ Keep it constructive and specific."""
                     # Generate opening message from each character
                     for character in scenario_characters:
                         try:
+                            logger.info(f"🎬 START: Generating opening message for {character.name}")
+                            
                             # Create opening message prompt for this character
                             opening_prompt = f"""Start the conversation by sending an opening message to the user. This should be the first thing you say to them in this scenario. Be authentic to your character and set the tone for the interaction.
 
@@ -1218,13 +1220,7 @@ This is the start of a social skills training conversation. Be true to your char
                             opening_message = await self._generate_character_response_with_fallback(
                                 opening_prompt, character, [], scenario.context, character_role_context
                             )
-                            
-                            # Add the opening message to conversation history
-                            self.active_sessions[user_id]["conversation_history"].append({
-                                "role": "assistant",
-                                "content": opening_message,
-                                "character": character.name
-                            })
+                            logger.info(f"🎬 START: Generated opening message for {character.name}: {opening_message[:50]}...")
                             
                             # Create embed for this character's opening message
                             opening_embed = discord.Embed(
@@ -1235,13 +1231,44 @@ This is the start of a social skills training conversation. Be true to your char
                             
                             opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
                             
-                            await dm_channel.send(embed=opening_embed)
+                            # Try to send with retry logic
+                            send_success = False
+                            max_retries = 3
+                            
+                            for retry in range(max_retries):
+                                try:
+                                    logger.info(f"🎬 START: Attempting to send opening message from {character.name} (attempt {retry+1})")
+                                    await dm_channel.send(embed=opening_embed)
+                                    logger.info(f"🎬 START: ✅ Successfully sent opening message from {character.name}")
+                                    send_success = True
+                                    break
+                                except discord.HTTPException as discord_error:
+                                    logger.error(f"🎬 START: ❌ Discord HTTP error sending {character.name}'s opening message (attempt {retry+1}/{max_retries}): {discord_error}")
+                                    if retry < max_retries - 1:
+                                        await asyncio.sleep(2 ** retry)
+                                except Exception as send_error:
+                                    logger.error(f"🎬 START: ❌ Error sending {character.name}'s opening message (attempt {retry+1}/{max_retries}): {send_error}")
+                                    if retry < max_retries - 1:
+                                        await asyncio.sleep(2 ** retry)
+                            
+                            # Only add to history if message was successfully sent
+                            if send_success:
+                                self.active_sessions[user_id]["conversation_history"].append({
+                                    "role": "assistant",
+                                    "content": opening_message,
+                                    "character": character.name
+                                })
+                                logger.info(f"🎬 START: Added {character.name}'s opening message to history")
+                            else:
+                                logger.error(f"🎬 START: ❌ FAILED to send opening message from {character.name} after {max_retries} attempts")
                             
                             # Small delay between character messages for better flow
                             await asyncio.sleep(1)
                             
                         except Exception as e:
-                            logger.error(f"Error generating opening message for character {character.name}: {e}")
+                            logger.error(f"🎬 START: ❌ Error generating opening message for character {character.name}: {e}")
+                            logger.error(f"🎬 START: ❌ Exception type: {type(e).__name__}")
+                            logger.error(f"🎬 START: ❌ Traceback: {traceback.format_exc()}")
                             continue
                     
                     # Save session state
@@ -1566,6 +1593,7 @@ This is the start of a social skills training conversation. Be true to your char
             # Generate responses from each character SEQUENTIALLY
             # This ensures each character sees previous character responses in the same turn
             for character in scenario_characters:
+                response = None
                 try:
                     logger.info(f"🎭 MULTI-CHAR: Generating response for {character.name}")
                     logger.info(f"🎭 MULTI-CHAR: Current conversation history length: {len(session['conversation_history'])}")
@@ -1579,15 +1607,6 @@ This is the start of a social skills training conversation. Be true to your char
                     )
                     logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
                     
-                    # Add character response to conversation history IMMEDIATELY
-                    # This ensures the next character sees this response
-                    session["conversation_history"].append({
-                        "role": "assistant",
-                        "content": response,
-                        "character": character.name
-                    })
-                    logger.info(f"🎭 MULTI-CHAR: Added {character.name}'s response to history. New length: {len(session['conversation_history'])}")
-                    
                     # Create embed for this character's response
                     embed = discord.Embed(
                         title=f"💬 {character.name}",
@@ -1599,16 +1618,60 @@ This is the start of a social skills training conversation. Be true to your char
                     turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
                     embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
                     
-                    # Send the response
-                    logger.info(f"🎭 MULTI-CHAR: Sending response from {character.name}")
-                    await channel.send(embed=embed)
-                    logger.info(f"🎭 MULTI-CHAR: Successfully sent response from {character.name}")
+                    # Try to send the response with retry logic
+                    logger.info(f"🎭 MULTI-CHAR: Attempting to send response from {character.name}")
+                    send_success = False
+                    max_send_retries = 3
+                    
+                    for retry in range(max_send_retries):
+                        try:
+                            await channel.send(embed=embed)
+                            logger.info(f"🎭 MULTI-CHAR: ✅ Successfully sent response from {character.name}")
+                            send_success = True
+                            break
+                        except discord.HTTPException as discord_error:
+                            logger.error(f"🎭 MULTI-CHAR: ❌ Discord HTTP error sending {character.name}'s message (attempt {retry+1}/{max_send_retries}): {discord_error}")
+                            if retry < max_send_retries - 1:
+                                await asyncio.sleep(2 ** retry)  # Exponential backoff
+                            else:
+                                logger.critical(f"🎭 MULTI-CHAR: ❌ FAILED to send {character.name}'s message after {max_send_retries} attempts")
+                        except Exception as send_error:
+                            logger.error(f"🎭 MULTI-CHAR: ❌ Unexpected error sending {character.name}'s message (attempt {retry+1}/{max_send_retries}): {send_error}")
+                            if retry < max_send_retries - 1:
+                                await asyncio.sleep(2 ** retry)
+                            else:
+                                logger.critical(f"🎭 MULTI-CHAR: ❌ FAILED to send {character.name}'s message after {max_send_retries} attempts")
+                    
+                    # Only add to history if message was successfully sent
+                    if send_success:
+                        session["conversation_history"].append({
+                            "role": "assistant",
+                            "content": response,
+                            "character": character.name
+                        })
+                        logger.info(f"🎭 MULTI-CHAR: Added {character.name}'s response to history. New length: {len(session['conversation_history'])}")
+                    else:
+                        logger.error(f"🎭 MULTI-CHAR: ❌ NOT adding {character.name}'s response to history because message send failed")
+                        # Notify user about the failure
+                        try:
+                            await channel.send(f"⚠️ Failed to send response from {character.name}. Please try again or use `!end` to restart.")
+                        except:
+                            pass
                     
                     # Small delay between character responses for better flow
                     await asyncio.sleep(1)
                     
                 except Exception as e:
-                    logger.error(f"Error generating response for character {character.name}: {e}")
+                    logger.error(f"🎭 MULTI-CHAR: ❌ Error generating response for character {character.name}: {e}")
+                    logger.error(f"🎭 MULTI-CHAR: ❌ Exception type: {type(e).__name__}")
+                    logger.error(f"🎭 MULTI-CHAR: ❌ Traceback: {traceback.format_exc()}")
+                    
+                    # Try to notify user about the failure
+                    try:
+                        await channel.send(f"⚠️ {character.name} encountered an error and couldn't respond. Continuing with other characters...")
+                    except:
+                        logger.error(f"🎭 MULTI-CHAR: ❌ Failed to send error notification for {character.name}")
+                    
                     # Continue with other characters even if one fails
                     continue
                     
