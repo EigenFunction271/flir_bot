@@ -529,6 +529,37 @@ Respond as {self.name} would, maintaining consistency with your defined personal
 - Never repeat yourself. 
 - Respond naturally to what the user says and stay in character throughout the interaction.
 """
+    
+    def to_dict(self) -> dict:
+        """Serialize CharacterPersona to dictionary for session persistence"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "biography": self.biography,
+            "personality_traits": self.personality_traits,
+            "communication_style": self.communication_style,
+            "scenario_affinity": [affinity.value for affinity in self.scenario_affinity],
+            "reference": self.reference,
+            "voice_id": self.voice_id,
+            "default_mood": self.default_mood.value
+            # Note: mood_behavior_rules not serialized (reconstructed from defaults/custom)
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'CharacterPersona':
+        """Deserialize CharacterPersona from dictionary"""
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            biography=data["biography"],
+            personality_traits=data["personality_traits"],
+            communication_style=data["communication_style"],
+            scenario_affinity=[ScenarioType(affinity) for affinity in data["scenario_affinity"]],
+            reference=data.get("reference"),
+            voice_id=data.get("voice_id"),
+            default_mood=CharacterMood(data.get("default_mood", "neutral"))
+            # mood_behavior_rules will be auto-initialized by __post_init__
+        )
 
 class CharacterManager:
     """Manages all character personas and their selection"""

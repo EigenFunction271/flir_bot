@@ -144,14 +144,15 @@ CRITICAL: Consider {character.name}'s personality - aggressive characters get an
                 )
             else:
                 # Using GeminiClient
-                import google.generativeai as genai
+                logger.info(f"🎭 MOOD: Using Gemini for mood inference")
                 response = await asyncio.to_thread(
                     self.llm_client.model.generate_content,
                     inference_prompt
                 )
                 response = response.text
+                logger.info(f"🎭 MOOD: Gemini returned response type: {type(response)}")
             
-            logger.info(f"🎭 MOOD: LLM raw response: {response[:200]}...")
+            logger.info(f"🎭 MOOD: LLM raw response (full): {response}")
             
             # Parse JSON response
             mood_data = self._parse_mood_response(response)
@@ -196,46 +197,164 @@ CRITICAL: Consider {character.name}'s personality - aggressive characters get an
         return "\n".join(formatted[-6:])  # Last 6 messages (3 exchanges)
     
     def _parse_mood_response(self, response: str) -> dict:
-        """Parse and validate LLM's mood inference response"""
-        # Try to extract JSON from response
-        json_match = re.search(r'\{[^}]+\}', response, re.DOTALL)
-        if json_match:
+        """Parse and validate LLM's mood inference response with robust JSON extraction"""
+        logger.info(f"🔍 PARSE: Attempting to parse mood response...")
+        
+        # Strategy 1: Try to find properly nested JSON with brace matching
+        json_str = self._extract_json_with_brace_matching(response)
+        
+        if json_str:
             try:
-                data = json.loads(json_match.group(0))
+                data = json.loads(json_str)
+                logger.info(f"✅ PARSE: Successfully extracted JSON using brace matching")
                 
-                # Validate required fields
-                if "mood" not in data or "intensity" not in data:
-                    raise ValueError("Missing required fields")
-                
-                # Validate mood is valid
-                try:
-                    CharacterMood(data["mood"])
-                except ValueError:
-                    logger.warning(f"Invalid mood '{data['mood']}', defaulting to neutral")
-                    data["mood"] = "neutral"
-                
-                # Validate intensity range
-                data["intensity"] = max(0.0, min(1.0, float(data["intensity"])))
-                
-                # Ensure reason exists
-                if "reason" not in data:
-                    data["reason"] = "Based on user's response"
-                
-                # Ensure trigger_keywords exists
-                if "trigger_keywords" not in data:
-                    data["trigger_keywords"] = []
-                
-                logger.info(f"✅ PARSE: Successfully parsed mood JSON")
-                return data
+                # Validate and sanitize the data
+                return self._validate_and_sanitize_mood_data(data)
                 
             except (json.JSONDecodeError, ValueError) as e:
-                logger.error(f"❌ PARSE: JSON parsing failed: {e}")
-                # Return neutral mood
-                return self._get_fallback_mood()
+                logger.warning(f"⚠️ PARSE: JSON decode failed even after extraction: {e}")
+                logger.warning(f"⚠️ PARSE: Extracted string was: {json_str[:200]}")
         
-        # No JSON found, return neutral
-        logger.error(f"❌ PARSE: No JSON found in response")
+        # Strategy 2: Try simple regex for flat JSON
+        simple_match = re.search(r'\{[^{}]+\}', response)
+        if simple_match:
+            try:
+                data = json.loads(simple_match.group(0))
+                logger.info(f"✅ PARSE: Successfully parsed using simple regex")
+                return self._validate_and_sanitize_mood_data(data)
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"⚠️ PARSE: Simple regex parsing failed: {e}")
+        
+        # Strategy 3: Try to parse the entire response as JSON
+        try:
+            data = json.loads(response.strip())
+            logger.info(f"✅ PARSE: Successfully parsed entire response as JSON")
+            return self._validate_and_sanitize_mood_data(data)
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(f"⚠️ PARSE: Full response is not valid JSON")
+        
+        # Strategy 4: Field-by-field extraction as last resort
+        logger.warning(f"⚠️ PARSE: Attempting field-by-field extraction as fallback")
+        extracted_data = self._extract_fields_from_text(response)
+        if extracted_data:
+            logger.info(f"✅ PARSE: Extracted fields from malformed response")
+            return extracted_data
+        
+        # All strategies failed
+        logger.error(f"❌ PARSE: All parsing strategies failed. Response was: {response[:500]}")
         return self._get_fallback_mood()
+    
+    def _extract_json_with_brace_matching(self, text: str) -> Optional[str]:
+        """Extract JSON by matching braces to handle nested structures"""
+        # Find first opening brace
+        start_idx = text.find('{')
+        if start_idx == -1:
+            return None
+        
+        # Match braces to find the complete JSON object
+        brace_count = 0
+        end_idx = start_idx
+        
+        for i in range(start_idx, len(text)):
+            if text[i] == '{':
+                brace_count += 1
+            elif text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+        
+        if brace_count != 0:
+            # Unmatched braces
+            return None
+        
+        json_str = text[start_idx:end_idx]
+        
+        # Clean up common issues
+        json_str = json_str.strip()
+        # Remove markdown code blocks if present
+        json_str = re.sub(r'^```(?:json)?\s*', '', json_str)
+        json_str = re.sub(r'\s*```$', '', json_str)
+        
+        return json_str
+    
+    def _validate_and_sanitize_mood_data(self, data: dict) -> dict:
+        """Validate and sanitize mood data from LLM"""
+        # Validate required fields
+        if "mood" not in data or "intensity" not in data:
+            logger.warning(f"⚠️ VALIDATE: Missing required fields in {data}")
+            return self._get_fallback_mood()
+        
+        # Validate mood is valid
+        try:
+            CharacterMood(data["mood"])
+        except ValueError:
+            logger.warning(f"⚠️ VALIDATE: Invalid mood '{data['mood']}', defaulting to neutral")
+            data["mood"] = "neutral"
+        
+        # Validate intensity range
+        try:
+            intensity = float(data["intensity"])
+            data["intensity"] = max(0.0, min(1.0, intensity))
+        except (ValueError, TypeError):
+            logger.warning(f"⚠️ VALIDATE: Invalid intensity '{data.get('intensity')}', defaulting to 0.5")
+            data["intensity"] = 0.5
+        
+        # Ensure reason exists
+        if "reason" not in data or not data["reason"]:
+            data["reason"] = "Inferred from user's response"
+        
+        # Ensure trigger_keywords exists and is a list
+        if "trigger_keywords" not in data:
+            data["trigger_keywords"] = []
+        elif not isinstance(data["trigger_keywords"], list):
+            # Try to convert to list if it's a string
+            if isinstance(data["trigger_keywords"], str):
+                data["trigger_keywords"] = [kw.strip() for kw in data["trigger_keywords"].split(",")]
+            else:
+                data["trigger_keywords"] = []
+        
+        logger.info(f"✅ VALIDATE: Mood data validated: {data}")
+        return data
+    
+    def _extract_fields_from_text(self, text: str) -> Optional[dict]:
+        """Extract mood fields from non-JSON text as last resort"""
+        result = {}
+        
+        # Try to find mood field
+        mood_match = re.search(r'"?mood"?\s*[:=]\s*"?(\w+)"?', text, re.IGNORECASE)
+        if mood_match:
+            result["mood"] = mood_match.group(1).lower()
+        
+        # Try to find intensity
+        intensity_match = re.search(r'"?intensity"?\s*[:=]\s*([0-9.]+)', text, re.IGNORECASE)
+        if intensity_match:
+            result["intensity"] = float(intensity_match.group(1))
+        
+        # Try to find reason
+        reason_match = re.search(r'"?reason"?\s*[:=]\s*"([^"]+)"', text, re.IGNORECASE)
+        if reason_match:
+            result["reason"] = reason_match.group(1)
+        
+        # Check if we got at least mood and intensity
+        if "mood" in result and "intensity" in result:
+            logger.info(f"✅ EXTRACT: Extracted fields from text: {result}")
+            # Add defaults for missing fields
+            if "reason" not in result:
+                result["reason"] = "Extracted from text"
+            if "trigger_keywords" not in result:
+                result["trigger_keywords"] = []
+            
+            # Validate extracted mood
+            try:
+                CharacterMood(result["mood"])
+                return result
+            except ValueError:
+                logger.warning(f"⚠️ EXTRACT: Invalid mood '{result['mood']}'")
+                return None
+        
+        logger.warning(f"⚠️ EXTRACT: Could not extract sufficient fields from text")
+        return None
     
     def _get_fallback_mood(self) -> dict:
         """Get fallback mood data when parsing fails"""

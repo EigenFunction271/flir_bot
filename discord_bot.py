@@ -50,7 +50,8 @@ class FlirBot(commands.Bot):
             self.scenario_manager = ScenarioManager()
             self.groq_client = GroqClient()
             self.gemini_client = GeminiClient()
-            self.mood_inference = MoodInferenceSystem(self.groq_client)
+            # Use Gemini for mood inference (better JSON compliance than Groq)
+            self.mood_inference = MoodInferenceSystem(self.gemini_client)
             logger.info("✅ All components initialized successfully")
         except Exception as e:
             logger.error(f"❌ Failed to initialize components: {e}")
