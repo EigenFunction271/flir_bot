@@ -168,33 +168,12 @@ class FlirBot(commands.Bot):
                     "difficulty": session["scenario"].difficulty,
                     "character_roles": session["scenario"].character_roles
                 },
-                "characters": [
-                    {
-                        "id": char.id,
-                        "name": char.name,
-                        "biography": char.biography,
-                        "personality_traits": char.personality_traits,
-                        "communication_style": char.communication_style,
-                        "scenario_affinity": [affinity.value for affinity in char.scenario_affinity],
-                        "reference": char.reference,
-                        "voice_id": char.voice_id
-                    } for char in session["characters"]
-                ],
+                "characters": [char.to_dict() for char in session["characters"]],
                 "context": session["context"],
-                "current_character": {
-                    "id": session["current_character"].id,
-                    "name": session["current_character"].name,
-                    "biography": session["current_character"].biography,
-                    "personality_traits": session["current_character"].personality_traits,
-                    "communication_style": session["current_character"].communication_style,
-                    "scenario_affinity": [affinity.value for affinity in session["current_character"].scenario_affinity],
-                    "reference": session["current_character"].reference,
-                    "voice_id": session["current_character"].voice_id
-                } if session["current_character"] else None,
+                "current_character": session["current_character"].to_dict() if session["current_character"] else None,
                 "conversation_history": session["conversation_history"],
                 "turn_count": session["turn_count"],
                 "created_at": session["created_at"].isoformat() if isinstance(session["created_at"], datetime) else session["created_at"],
-                # NEW: Serialize character moods
                 "character_moods": {
                     char_id: mood_state.to_dict()
                     for char_id, mood_state in session.get("character_moods", {}).items()
@@ -224,35 +203,13 @@ class FlirBot(commands.Bot):
             character_roles=scenario_data.get("character_roles")
         )
         
-        # Reconstruct characters
-        characters = []
-        for char_data in session_dict["characters"]:
-            character = CharacterPersona(
-                id=char_data["id"],
-                name=char_data["name"],
-                biography=char_data["biography"],
-                personality_traits=char_data["personality_traits"],
-                communication_style=char_data["communication_style"],
-                scenario_affinity=[ScenarioType(affinity) for affinity in char_data["scenario_affinity"]],
-                reference=char_data.get("reference"),
-                voice_id=char_data.get("voice_id")
-            )
-            characters.append(character)
+        # Reconstruct characters using from_dict
+        characters = [CharacterPersona.from_dict(char_data) for char_data in session_dict["characters"]]
         
-        # Reconstruct current character
+        # Reconstruct current character using from_dict
         current_character = None
         if session_dict["current_character"]:
-            char_data = session_dict["current_character"]
-            current_character = CharacterPersona(
-                id=char_data["id"],
-                name=char_data["name"],
-                biography=char_data["biography"],
-                personality_traits=char_data["personality_traits"],
-                communication_style=char_data["communication_style"],
-                scenario_affinity=[ScenarioType(affinity) for affinity in char_data["scenario_affinity"]],
-                reference=char_data.get("reference"),
-                voice_id=char_data.get("voice_id")
-            )
+            current_character = CharacterPersona.from_dict(session_dict["current_character"])
         
         # Reconstruct character moods
         character_moods = {}
@@ -337,72 +294,43 @@ class FlirBot(commands.Bot):
         Returns:
             tuple: (is_valid, error_message)
         """
-        if not message or not message.strip():
-            return False, "Message cannot be empty"
+        # Basic length checks
+        if not message or len(message.strip()) < 2:
+            return False, "Message must contain at least 2 characters"
         
-        if len(message) > 2000:  # Discord message limit
+        if len(message) > 2000:
             return False, "Message is too long (max 2000 characters)"
         
-        if len(message.strip()) < 1:
-            return False, "Message must contain at least one character"
-        
-        # Check for excessive whitespace or repeated characters
-        if len(message.strip()) < 2:
-            return False, "Message must contain at least 2 meaningful characters"
-        
-        # Check for excessive repetition (spam detection)
+        # Spam detection - excessive repetition
         if len(set(message.strip())) < 3 and len(message.strip()) > 10:
-            return False, "Message appears to be spam (too many repeated characters)"
+            return False, "Message appears to be spam"
         
-        # Enhanced content filtering
-        dangerous_patterns = [
-            r'<script.*?>',  # Script tags
-            r'javascript:',  # JavaScript URLs
-            r'data:text/html',  # Data URLs
-            r'vbscript:',  # VBScript URLs
-            r'onload\s*=',  # Event handlers
-            r'onerror\s*=',  # Event handlers
-            r'onclick\s*=',  # Event handlers
-            r'<iframe.*?>',  # Iframe tags
-            r'<object.*?>',  # Object tags
-            r'<embed.*?>',  # Embed tags
-            r'<link.*?>',  # Link tags
-            r'<meta.*?>',  # Meta tags
-            r'<style.*?>',  # Style tags
-            r'@everyone',  # Discord mentions
-            r'@here',  # Discord mentions
-            r'<@!?\d+>',  # User mentions
-            r'<#\d+>',  # Channel mentions
-            r'<@&\d+>',  # Role mentions
+        # Define validation rules as tuples (pattern, error_message)
+        VALIDATION_RULES = [
+            # Security - XSS and injection patterns
+            (r'<script.*?>|javascript:|data:text/html|vbscript:', "Message contains potentially unsafe content"),
+            (r'onload\s*=|onerror\s*=|onclick\s*=', "Message contains potentially unsafe content"),
+            (r'<iframe.*?>|<object.*?>|<embed.*?>|<link.*?>|<meta.*?>|<style.*?>', "Message contains potentially unsafe content"),
+            # Discord mentions
+            (r'@everyone|@here|<@!?\d+>|<#\d+>|<@&\d+>', "Please avoid mentions"),
+            # Bot commands
+            (r'^[!/]\w+', "Please don't include bot commands in your messages"),
         ]
         
-        for pattern in dangerous_patterns:
+        for pattern, error_msg in VALIDATION_RULES:
             if re.search(pattern, message, re.IGNORECASE):
-                return False, "Message contains potentially unsafe content"
+                return False, error_msg
         
-        # Check for excessive special characters (potential obfuscation)
+        # Statistical checks
         special_char_count = len(re.findall(r'[^\w\s]', message))
-        if special_char_count > len(message) * 0.5:  # More than 50% special chars
+        if special_char_count > len(message) * 0.5:
             return False, "Message contains too many special characters"
         
-        # Check for potential command injection
-        command_patterns = [
-            r'![\w]+',  # Bot commands
-            r'/\w+',  # Slash commands
-            r'\.\w+\s*\(',  # Function calls
-        ]
-        
-        for pattern in command_patterns:
-            if re.search(pattern, message, re.IGNORECASE):
-                return False, "Message appears to contain commands"
-        
-        # Check for excessive capitalization (shouting)
-        if len(re.findall(r'[A-Z]', message)) > len(message) * 0.7:  # More than 70% caps
+        caps_count = len(re.findall(r'[A-Z]', message))
+        if caps_count > len(message) * 0.7:
             return False, "Please avoid excessive capitalization"
         
-        # Check for excessive punctuation
-        punctuation_count = len(re.findall(r'[!?]{3,}', message))  # 3+ consecutive ! or ?
-        if punctuation_count > 0:
+        if re.search(r'[!?]{3,}', message):
             return False, "Please avoid excessive punctuation"
         
         return True, ""
@@ -1245,20 +1173,38 @@ This is the start of a social skills training conversation. Be true to your char
                             # Get character-specific role context from scenario
                             character_role_context = scenario.get_character_role_context(character.id)
                             
+                            # Get character's initial mood
+                            current_mood = self.active_sessions[user_id]["character_moods"].get(
+                                character.id,
+                                MoodState(current_mood=character.default_mood, intensity=0.7, reason="Starting scenario")
+                            )
+                            
                             # Generate opening message with scenario context and character role
-                            opening_message = await self._generate_character_response_with_fallback(
-                                opening_prompt, character, [], scenario.context, character_role_context
+                            opening_message, updated_mood = await self._generate_character_response_with_fallback(
+                                message=opening_prompt,
+                                character=character,
+                                conversation_history=[],
+                                scenario_context=scenario.context,
+                                character_role_context=character_role_context,
+                                current_mood_state=current_mood
                             )
                             logger.info(f"🎬 START: Generated opening message for {character.name}: {opening_message[:50]}...")
+                            
+                            # Update mood in session
+                            self.active_sessions[user_id]["character_moods"][character.id] = updated_mood
+                            
+                            # Get mood color
+                            mood_color = self._get_mood_color(updated_mood.current_mood)
                             
                             # Create embed for this character's opening message
                             opening_embed = discord.Embed(
                                 title=f"💬 {character.name}",
                                 description=opening_message,
-                                color=0x0099ff
+                                color=mood_color
                             )
                             
-                            opening_embed.set_footer(text=f"Turn 1/{Config.MAX_CONVERSATION_TURNS} • {Config.MAX_CONVERSATION_TURNS - 1} turns remaining")
+                            mood_emoji = self._get_mood_emoji(updated_mood.current_mood)
+                            opening_embed.set_footer(text=f"{mood_emoji} {updated_mood.current_mood.value} • Turn 1/{Config.MAX_CONVERSATION_TURNS}")
                             
                             # Try to send with retry logic
                             send_success = False
@@ -1767,9 +1713,24 @@ This is the start of a social skills training conversation. Be true to your char
             current_char = session.get("current_character")
             if current_char:
                 character_role_context = session["scenario"].get_character_role_context(current_char.id)
-                response = await self._generate_character_response_with_fallback(
-                    user_message, current_char, session["conversation_history"], session["scenario"].context, character_role_context
+                current_mood = session.get("character_moods", {}).get(
+                    current_char.id,
+                    MoodState(current_mood=current_char.default_mood, intensity=0.5, reason="Fallback")
                 )
+                
+                response, updated_mood = await self._generate_character_response_with_fallback(
+                    message=user_message,
+                    character=current_char,
+                    conversation_history=session["conversation_history"],
+                    scenario_context=session["scenario"].context,
+                    character_role_context=character_role_context,
+                    current_mood_state=current_mood
+                )
+                
+                # Update mood in session
+                if "character_moods" not in session:
+                    session["character_moods"] = {}
+                session["character_moods"][current_char.id] = updated_mood
                 
                 session["conversation_history"].append({
                     "role": "assistant",
@@ -1777,14 +1738,16 @@ This is the start of a social skills training conversation. Be true to your char
                     "character": current_char.name
                 })
                 
+                mood_color = self._get_mood_color(updated_mood.current_mood)
                 embed = discord.Embed(
                     title=f"💬 {current_char.name}",
                     description=response,
-                    color=0x0099ff
+                    color=mood_color
                 )
                 
                 turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                mood_emoji = self._get_mood_emoji(updated_mood.current_mood)
+                embed.set_footer(text=f"{mood_emoji} {updated_mood.current_mood.value} • Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}")
                 
                 await channel.send(embed=embed)
     

@@ -149,6 +149,33 @@ class CharacterPersona:
         if not self.mood_behavior_rules:
             self.mood_behavior_rules = self._generate_default_mood_rules()
     
+    def to_dict(self) -> dict:
+        """Serialize character to dictionary for session persistence"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "biography": self.biography,
+            "personality_traits": self.personality_traits,
+            "communication_style": self.communication_style,
+            "scenario_affinity": [affinity.value for affinity in self.scenario_affinity],
+            "reference": self.reference,
+            "voice_id": self.voice_id
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'CharacterPersona':
+        """Deserialize character from dictionary"""
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            biography=data["biography"],
+            personality_traits=data["personality_traits"],
+            communication_style=data["communication_style"],
+            scenario_affinity=[ScenarioType(affinity) for affinity in data["scenario_affinity"]],
+            reference=data.get("reference"),
+            voice_id=data.get("voice_id")
+        )
+    
     def generate_system_prompt(self, scenario_context: str = None, character_role_context: str = None) -> str:
         """Generate the system prompt for this character"""
         reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}. NEVER break character or identify yourself as anything other than {self.name}." if self.reference else ""
