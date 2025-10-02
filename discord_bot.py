@@ -13,10 +13,11 @@ from pathlib import Path
 import re
 
 from config import Config
-from characters import CharacterManager, CharacterPersona, ScenarioType
+from characters import CharacterManager, CharacterPersona, ScenarioType, CharacterMood, MoodState
 from scenarios import ScenarioManager, Scenario
 from groq_client import GroqClient
 from gemini_client import GeminiClient
+from mood_inference import MoodInferenceSystem
 
 # Set up logging
 logging.basicConfig(
@@ -49,6 +50,7 @@ class FlirBot(commands.Bot):
             self.scenario_manager = ScenarioManager()
             self.groq_client = GroqClient()
             self.gemini_client = GeminiClient()
+            self.mood_inference = MoodInferenceSystem(self.groq_client)
             logger.info("✅ All components initialized successfully")
         except Exception as e:
             logger.error(f"❌ Failed to initialize components: {e}")
@@ -191,7 +193,12 @@ class FlirBot(commands.Bot):
                 } if session["current_character"] else None,
                 "conversation_history": session["conversation_history"],
                 "turn_count": session["turn_count"],
-                "created_at": session["created_at"].isoformat() if isinstance(session["created_at"], datetime) else session["created_at"]
+                "created_at": session["created_at"].isoformat() if isinstance(session["created_at"], datetime) else session["created_at"],
+                # NEW: Serialize character moods
+                "character_moods": {
+                    char_id: mood_state.to_dict()
+                    for char_id, mood_state in session.get("character_moods", {}).items()
+                }
             }
             json_sessions[str(user_id)] = json_session
         return json_sessions
@@ -247,6 +254,12 @@ class FlirBot(commands.Bot):
                 voice_id=char_data.get("voice_id")
             )
         
+        # Reconstruct character moods
+        character_moods = {}
+        if "character_moods" in session_dict:
+            for char_id, mood_data in session_dict["character_moods"].items():
+                character_moods[char_id] = MoodState.from_dict(mood_data)
+        
         # Reconstruct session
         session = {
             "scenario": scenario,
@@ -255,7 +268,8 @@ class FlirBot(commands.Bot):
             "current_character": current_character,
             "conversation_history": session_dict["conversation_history"],
             "turn_count": session_dict["turn_count"],
-            "created_at": datetime.fromisoformat(session_dict["created_at"]) if isinstance(session_dict["created_at"], str) else session_dict["created_at"]
+            "created_at": datetime.fromisoformat(session_dict["created_at"]) if isinstance(session_dict["created_at"], str) else session_dict["created_at"],
+            "character_moods": character_moods  # NEW
         }
         
         return session
@@ -1129,6 +1143,20 @@ Keep it constructive and specific."""
             # Select the first character as the key character
             key_character = characters[0]
             
+            # Initialize mood states for all characters
+            character_moods = {}
+            for character in characters:
+                initial_mood = character.get_initial_mood_for_scenario(
+                    scenario.context,
+                    scenario.get_character_role_context(character.id)
+                )
+                character_moods[character.id] = MoodState(
+                    current_mood=initial_mood,
+                    intensity=0.7,
+                    reason="Starting the scenario"
+                )
+                logger.info(f"🎭 INIT: {character.name} starting mood: {initial_mood.value}")
+            
             # Create session with the key character already selected
             self.active_sessions[user_id] = {
                 "scenario": scenario,
@@ -1137,7 +1165,8 @@ Keep it constructive and specific."""
                 "current_character": key_character,
                 "conversation_history": [],
                 "turn_count": 0,
-                "created_at": datetime.now()
+                "created_at": datetime.now(),
+                "character_moods": character_moods  # NEW
             }
             
             # Send scenario introduction
@@ -1524,16 +1553,47 @@ This is the start of a social skills training conversation. Be true to your char
             if message.guild is None:  # DM
                 await message.channel.send("❌ Sorry, I encountered an error. Please try again.")
     
-    async def _generate_character_response_with_fallback(self, message: str, character: CharacterPersona, conversation_history: List[Dict], scenario_context: str = None, character_role_context: str = None) -> str:
-        """Generate character response with fallback mechanisms"""
+    async def _generate_character_response_with_fallback(
+        self, 
+        message: str, 
+        character: CharacterPersona, 
+        conversation_history: List[Dict], 
+        scenario_context: str = None, 
+        character_role_context: str = None,
+        current_mood_state: MoodState = None
+    ) -> tuple[str, MoodState]:
+        """Generate character response with mood inference and fallback mechanisms"""
         try:
-            # Generate character-specific system prompt with role context
-            system_prompt = character.generate_system_prompt(scenario_context, character_role_context)
-            logger.info(f"🎭 SYSTEM: Generated system prompt for {character.name}: {system_prompt[:100]}...")
-            if character_role_context:
-                logger.info(f"🎭 ROLE: Character role context for {character.name}: {character_role_context[:100]}...")
+            # STEP 1: Infer character's new mood based on user's message
+            if current_mood_state:
+                logger.info(f"🎭 MOOD: Starting mood inference for {character.name}")
+                updated_mood = await self.mood_inference.infer_mood(
+                    character=character,
+                    user_message=message,
+                    current_mood_state=current_mood_state,
+                    conversation_history=conversation_history,
+                    scenario_context=scenario_context or ""
+                )
+            else:
+                # Fallback for backward compatibility
+                logger.warning(f"🎭 MOOD: No mood state provided, using default")
+                updated_mood = MoodState(
+                    current_mood=character.default_mood,
+                    intensity=0.5,
+                    reason="No mood state provided"
+                )
             
-            # Try Groq first with character-specific memory
+            # STEP 2: Generate dynamic prompt with mood-based instructions
+            system_prompt = character.generate_dynamic_prompt(
+                mood_state=updated_mood,
+                user_message=message,
+                scenario_context=scenario_context,
+                character_role_context=character_role_context
+            )
+            logger.info(f"🎭 PROMPT: Generated dynamic prompt for {character.name} (mood: {updated_mood.current_mood.value})")
+            logger.debug(f"🎭 PROMPT: Preview: {system_prompt[:200]}...")
+            
+            # STEP 3: Generate response with mood-aware prompt
             response = await self.groq_client.generate_response_with_history(
                 user_message=message,
                 system_prompt=system_prompt,
@@ -1541,23 +1601,30 @@ This is the start of a social skills training conversation. Be true to your char
                 model_type="fast",
                 current_character_name=character.name
             )
-            return response
-        except Exception as e:
-            logger.warning(f"Groq response generation failed: {e}")
             
-            # Fallback to basic response (without history)
+            logger.info(f"✅ RESPONSE: Generated for {character.name} in mood {updated_mood.current_mood.value}")
+            return response, updated_mood
+            
+        except Exception as e:
+            logger.warning(f"Mood-aware response generation failed for {character.name}: {e}")
+            
+            # Fallback to basic response (without mood inference)
             try:
+                system_prompt = character.generate_system_prompt(scenario_context, character_role_context)
                 response = await self.groq_client.generate_response(
                     user_message=message,
                     system_prompt=system_prompt,
                     model_type="fast"
                 )
-                return response
+                # Keep current mood if inference failed
+                fallback_mood = current_mood_state or MoodState(current_mood=character.default_mood)
+                return response, fallback_mood
             except Exception as e2:
                 logger.error(f"Groq fallback also failed: {e2}")
                 
                 # Final fallback - basic response
-                return self._generate_basic_character_response(character, message)
+                fallback_mood = current_mood_state or MoodState(current_mood=character.default_mood)
+                return self._generate_basic_character_response(character, message), fallback_mood
     
     def _generate_basic_character_response(self, character: CharacterPersona, message: str) -> str:
         """Generate basic character response when all AI services fail"""
@@ -1601,22 +1668,41 @@ This is the start of a social skills training conversation. Be true to your char
                     # Get character-specific role context from scenario
                     character_role_context = session["scenario"].get_character_role_context(character.id)
                     
-                    # Generate response for this character using CURRENT conversation history
-                    response = await self._generate_character_response_with_fallback(
-                        user_message, character, session["conversation_history"], session["scenario"].context, character_role_context
+                    # Get character's current mood
+                    current_mood = session["character_moods"].get(
+                        character.id,
+                        MoodState(current_mood=character.default_mood, intensity=0.5, reason="Default")
+                    )
+                    
+                    # Generate response for this character using CURRENT conversation history WITH mood inference
+                    response, updated_mood = await self._generate_character_response_with_fallback(
+                        message=user_message,
+                        character=character,
+                        conversation_history=session["conversation_history"],
+                        scenario_context=session["scenario"].context,
+                        character_role_context=character_role_context,
+                        current_mood_state=current_mood
                     )
                     logger.info(f"🎭 MULTI-CHAR: Generated response for {character.name}: {response[:50]}...")
+                    logger.info(f"🎭 MOOD UPDATE: {character.name} mood: {current_mood.current_mood.value} → {updated_mood.current_mood.value}")
+                    
+                    # Update session with new mood
+                    session["character_moods"][character.id] = updated_mood
+                    
+                    # Get mood color for embed
+                    mood_color = self._get_mood_color(updated_mood.current_mood)
                     
                     # Create embed for this character's response
                     embed = discord.Embed(
                         title=f"💬 {character.name}",
                         description=response,
-                        color=0x0099ff
+                        color=mood_color
                     )
                     
-                    # Add turn counter to embed
+                    # Add turn counter and mood indicator to embed
                     turns_remaining = Config.MAX_CONVERSATION_TURNS - session["turn_count"]
-                    embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
+                    mood_emoji = self._get_mood_emoji(updated_mood.current_mood)
+                    embed.set_footer(text=f"{mood_emoji} {updated_mood.current_mood.value} • Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS}")
                     
                     # Try to send the response with retry logic
                     logger.info(f"🎭 MULTI-CHAR: Attempting to send response from {character.name}")
@@ -1701,6 +1787,52 @@ This is the start of a social skills training conversation. Be true to your char
                 embed.set_footer(text=f"Turn {session['turn_count']}/{Config.MAX_CONVERSATION_TURNS} • {turns_remaining} turns remaining")
                 
                 await channel.send(embed=embed)
+    
+    def _get_mood_color(self, mood: CharacterMood) -> int:
+        """Get Discord embed color based on mood"""
+        mood_colors = {
+            CharacterMood.PLEASED: 0x00ff00,      # Green
+            CharacterMood.ENCOURAGED: 0x7cfc00,   # Lawn green
+            CharacterMood.IMPRESSED: 0x00cc66,    # Emerald
+            CharacterMood.RESPECTFUL: 0x0099ff,   # Blue
+            CharacterMood.SKEPTICAL: 0xff9900,    # Orange
+            CharacterMood.IMPATIENT: 0xffcc00,    # Gold
+            CharacterMood.ANNOYED: 0xff9900,      # Orange
+            CharacterMood.FRUSTRATED: 0xff6600,   # Dark orange
+            CharacterMood.DISAPPOINTED: 0x666666, # Gray
+            CharacterMood.DISMISSIVE: 0x999999,   # Light gray
+            CharacterMood.DEFENSIVE: 0xff6666,    # Light red
+            CharacterMood.ANGRY: 0xff0000,        # Red
+            CharacterMood.HOSTILE: 0xcc0000,      # Dark red
+            CharacterMood.CONTEMPTUOUS: 0x660000, # Very dark red
+            CharacterMood.MANIPULATIVE: 0x990099, # Purple
+            CharacterMood.CALCULATING: 0x666699,  # Blue-gray
+            CharacterMood.NEUTRAL: 0x0099ff,      # Default blue
+        }
+        return mood_colors.get(mood, 0x0099ff)
+    
+    def _get_mood_emoji(self, mood: CharacterMood) -> str:
+        """Get emoji representation of mood"""
+        mood_emojis = {
+            CharacterMood.PLEASED: "😊",
+            CharacterMood.ENCOURAGED: "🙂",
+            CharacterMood.IMPRESSED: "😮",
+            CharacterMood.RESPECTFUL: "🤝",
+            CharacterMood.SKEPTICAL: "🤨",
+            CharacterMood.IMPATIENT: "⏱️",
+            CharacterMood.ANNOYED: "😒",
+            CharacterMood.FRUSTRATED: "😤",
+            CharacterMood.DISAPPOINTED: "😔",
+            CharacterMood.DISMISSIVE: "🙄",
+            CharacterMood.DEFENSIVE: "🛡️",
+            CharacterMood.ANGRY: "😠",
+            CharacterMood.HOSTILE: "😡",
+            CharacterMood.CONTEMPTUOUS: "😤",
+            CharacterMood.MANIPULATIVE: "😈",
+            CharacterMood.CALCULATING: "🤔",
+            CharacterMood.NEUTRAL: "😐",
+        }
+        return mood_emojis.get(mood, "😐")
 
 async def health_check(request):
     """Health check endpoint for Render with error boundaries"""
