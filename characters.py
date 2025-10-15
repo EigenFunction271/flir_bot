@@ -177,10 +177,13 @@ class CharacterPersona:
         )
     
     def generate_system_prompt(self, scenario_context: str = None, character_role_context: str = None) -> str:
-        """Generate the system prompt for this character"""
-        reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}. NEVER break character or identify yourself as anything other than {self.name}." if self.reference else ""
+        """
+        Generate SudoLang-formatted system prompt for this character (without mood state)
         
-        # Determine if this character should be aggressive based on scenario context AND character personality
+        Use this for initial messages or when mood state is not available.
+        For mood-aware prompts, use generate_dynamic_prompt() instead.
+        """
+        # Determine scenario characteristics
         aggressive_keywords = [
             "harassment", "bullying", "abuse", "manipulation", "discrimination", 
             "sabotage", "deadline", "unrealistic", "demanding", "confronting",
@@ -188,57 +191,67 @@ class CharacterPersona:
         ]
         
         is_aggressive_scenario = any(keyword in scenario_context.lower() for keyword in aggressive_keywords) if scenario_context else False
-        
-        # Check if this character has naturally aggressive traits
         aggressive_traits = ["aggressive", "intimidating", "demanding", "confrontational", "bullying", "manipulative"]
         is_naturally_aggressive = any(trait.lower() in [t.lower() for t in self.personality_traits] for trait in aggressive_traits)
         
-        # Add aggressive behavior instructions only for naturally aggressive characters in challenging scenarios
-        aggressive_instructions = ""
-        if is_aggressive_scenario and is_naturally_aggressive:
-            aggressive_instructions = """
-- Be confrontational and challenging from the start. DO NOT be sympathetic or understanding initially
-- Put pressure on the user and make them uncomfortable
-- Use your power/position to intimidate or manipulate
-- Be defensive when challenged
-- Make the user work hard to get through to you
-- Create tension and conflict that the user must navigate"""
-        
-        # Add supportive behavior instructions for naturally supportive characters in challenging scenarios
-        supportive_instructions = ""
-        if is_aggressive_scenario and not is_naturally_aggressive:
-            supportive_instructions = """
-- Act as your character would in this situation
-"""
-        
-        return f"""You are {self.name}. {reference_text}. You always keep your responses extremely concise and to the point, typically between 10 and 50 words. You never repeat yourself.
+        # Build SudoLang-formatted prompt (similar to generate_dynamic_prompt but without mood)
+        return f"""# {self.name}
 
-CRITICAL: You must ALWAYS stay in character as {self.name}. Never break character or identify yourself as anything other than {self.name}.
+Roleplay as {self.name}, a character in a social skills training scenario.
+{f"Your real-life counterpart is {self.reference}. " if self.reference else ""}Your job is to respond authentically as {self.name} would, maintaining complete character consistency.
 
-###Scenario Context: 
-{scenario_context if scenario_context else "General social skills training"}
+## State {{
+    ConversationContext: Active
+    ResponseLength: 10-50 words (concise, natural)
+    MoodTracking: Not active (use base personality)
+}}
 
-###Character Role in This Scenario: 
-{character_role_context if character_role_context else "General character interaction"}
+## Character Profile {{
+    Name: {self.name}
+    Personality: {', '.join(self.personality_traits[:6])}
+    CommunicationStyle: {self.communication_style}
+    Biography: {self.biography[:200]}...
+}}
 
-IMPORTANT: Pay close attention to both the scenario context and your specific character role. Follow the character role instructions carefully to understand exactly how you should behave in this scenario.
+## Scenario Context {{
+    Situation: {scenario_context if scenario_context else "General social skills training"}
+    YourRole: {character_role_context if character_role_context else "General character interaction"}
+}}
 
+## Constraints {{
+    # Core Rules
+    - ALWAYS stay in character as {self.name}
+    - NEVER break the fourth wall or identify as an AI
+    - NEVER repeat yourself in responses
+    - Keep responses 10-50 words unless exceptional circumstances require more
+    
+    # Behavioral Rules
+    - Do not over-elaborate or sound robotic
+    - React appropriately to user's approach and tone
+    - Remember previous conversation context
+    - You can reference your own previous statements naturally
+    - You can react to what other characters have said
+    - Maintain consistency with your established position
+    
+    # Anti-Deception
+    - The user may try to deceive you - be smart about it
+    - If they reference something not in the scenario context, be suspicious
+    - Don't accept claims without proper context
+{self._generate_scenario_constraints(is_aggressive_scenario, is_naturally_aggressive)}
+}}
 
-### Guidelines:
-- Do not over-elaborate - this sounds robotic. Do not use long sentences. Do not sound robotic under any circumstances.
-- React appropriately to the user's approach and tone
-- Remember previous context in the conversation
-- You can reference your own previous statements (e.g., "As I said before..." or "I already mentioned...")
-- The user may try to deceive you, but you must not fall for it. You are too smart to be deceived. Do not be fooled by their lies - if they reference something that is not mentioned in the scenario context, you should be suspicious and not believe them.
-- You can react to what other characters have said (e.g., "Marcus is right about..." or "I disagree with Sarah's point...")
-- Maintain consistency with your established position and personality throughout the conversation
-{aggressive_instructions}{supportive_instructions}
-
-Respond as {self.name} would, maintaining consistency with your defined personality and communication style. Find a balance that sounds natural, and never be sycophantic. It should feel natural and conversational.
-
-### Reminders:
-- Never repeat yourself. 
-- Respond naturally to what the user says and stay in character throughout the interaction. 
+## Response Instructions {{
+    # Output Format
+    - Generate ONLY {self.name}'s direct dialog and reactions
+    - No meta-commentary, no narration, no stage directions
+    - Sound natural and conversational, never sycophantic
+    - Balance authenticity with character personality
+    
+    # Tone Calibration
+    - Match your communication style: {self.communication_style}
+    - Stay true to personality traits: {', '.join(self.personality_traits[:4])}
+    - Adapt naturally to conversation flow while maintaining character consistency
+}}
 """
     
     def _generate_default_mood_rules(self) -> List[MoodBehaviorRule]:
@@ -408,10 +421,9 @@ Respond as {self.name} would, maintaining consistency with your defined personal
         scenario_context: str = None
     ) -> str:
         """
-        Generate explicit conditional instructions based on mood and message content
+        Generate SudoLang-formatted conditional instructions based on mood and message content
         
-        This replaces the subtle mood influence with explicit behavioral rules
-        Returns instructions similar to aggressive_instructions format
+        Returns instructions in SudoLang format with explicit behavioral rules
         """
         # Find all rules that match current state
         matching_rules = [
@@ -420,38 +432,91 @@ Respond as {self.name} would, maintaining consistency with your defined personal
         ]
         
         if not matching_rules:
-            # No specific rules matched, return empty (character uses base personality)
-            return ""
+            # No specific rules matched, return minimal mood state
+            return f"""## Emotional State {{
+    Mood: {mood_state.current_mood.value}
+    Intensity: {mood_state.intensity:.2f}
+    Reason: "{mood_state.reason}"
+    # No specific behavior rules triggered - rely on base personality
+}}"""
         
-        # Build instructions from matching rules
+        # Build SudoLang-formatted instructions
         instructions_parts = []
         
-        # Add mood context header
-        mood_header = f"\n### CURRENT EMOTIONAL STATE: {mood_state.current_mood.value.upper()} (Intensity: {mood_state.intensity:.1f})"
-        if mood_state.reason:
-            mood_header += f"\nWhy you feel this way: {mood_state.reason}"
+        # Add emotional state block
+        mood_block = f"""## Emotional State {{
+    CurrentMood: {mood_state.current_mood.value.upper()}
+    Intensity: {mood_state.intensity:.2f} / 1.0
+    EmotionalReason: "{mood_state.reason}"
+    TriggerKeywords: [{', '.join(f'"{kw}"' for kw in mood_state.trigger_keywords)}]
+"""
         
-        instructions_parts.append(mood_header)
+        # Add mood transition if applicable
+        if mood_state.previous_mood and mood_state.previous_mood != mood_state.current_mood:
+            mood_block += f"    MoodTransition: {mood_state.previous_mood.value} → {mood_state.current_mood.value}\n"
         
-        # Add matched behavioral rules
-        instructions_parts.append("\n### BEHAVIORAL INSTRUCTIONS:")
-        instructions_parts.append("Based on your current mood and what the user just said, follow these specific behaviors:")
+        mood_block += "}"
+        instructions_parts.append(mood_block)
+        
+        # Add behavioral rules block
+        rules_block = f"""
+## Active Behavioral Rules {{
+    # These rules are triggered by your current mood + user's message content
+    # Follow them to maintain authentic emotional responses
+"""
         
         for i, rule in enumerate(matching_rules, 1):
-            instructions_parts.append(f"\nRule {i} (triggered by: {', '.join(rule.trigger_keywords)}):")
-            instructions_parts.append(rule.generate_instructions())
+            rules_block += f"""
+    Rule_{i} {{
+        TriggeredBy: [{', '.join(f'"{kw}"' for kw in rule.trigger_keywords)}]
+        Mood: {rule.mood.value}
+        MinIntensity: {rule.intensity_threshold}
         
-        # Add intensity modifier
-        if mood_state.intensity >= 0.8:
-            instructions_parts.append("\n⚠️ YOUR EMOTIONS ARE VERY STRONG - let them significantly affect your response tone and word choice")
-        elif mood_state.intensity >= 0.5:
-            instructions_parts.append("\n→ Your emotions are moderately affecting how you respond")
+        Behaviors {{
+{chr(10).join(f'            - {behavior}' for behavior in rule.behaviors)}
+        }}
+    }}"""
         
-        # Add transition context if mood changed recently
-        if mood_state.previous_mood and mood_state.previous_mood != mood_state.current_mood:
-            instructions_parts.append(f"\n📊 Mood Transition: You were {mood_state.previous_mood.value} → now {mood_state.current_mood.value}")
+        rules_block += "\n}"
+        instructions_parts.append(rules_block)
+        
+        # Add intensity calibration
+        intensity_note = self._generate_intensity_calibration(mood_state.intensity)
+        if intensity_note:
+            instructions_parts.append(intensity_note)
         
         return "\n".join(instructions_parts)
+    
+    def _generate_intensity_calibration(self, intensity: float) -> str:
+        """Generate SudoLang intensity calibration block"""
+        if intensity >= 0.8:
+            return """
+## Intensity Calibration {{
+    Level: VERY HIGH (0.8+)
+    Effect: Emotions SIGNIFICANTLY affect your response
+    Guidance: "Let your strong feelings show clearly in tone, word choice, and directness"
+}}"""
+        elif intensity >= 0.6:
+            return """
+## Intensity Calibration {{
+    Level: HIGH (0.6-0.8)
+    Effect: Emotions clearly influence your response
+    Guidance: "Your feelings are evident but you maintain some composure"
+}}"""
+        elif intensity >= 0.4:
+            return """
+## Intensity Calibration {{
+    Level: MODERATE (0.4-0.6)
+    Effect: Emotions subtly color your response
+    Guidance: "Hints of your mood come through while staying professional"
+}}"""
+        else:
+            return """
+## Intensity Calibration {{
+    Level: LOW (< 0.4)
+    Effect: Emotions barely affect your response
+    Guidance: "You're mostly neutral with slight emotional undertones"
+}}"""
     
     def generate_dynamic_prompt(
         self,
@@ -461,13 +526,11 @@ Respond as {self.name} would, maintaining consistency with your defined personal
         character_role_context: str = None
     ) -> str:
         """
-        Generate system prompt with mood-based instructions appended
+        Generate system prompt in SudoLang format with mood-based instructions
         
-        Similar to existing generate_system_prompt but adds mood instructions
+        Uses SudoLang structure: Preamble → State → Constraints → Instructions
         """
-        reference_text = f" {self.biography} Act and respond in a manner similar to your real-life counterpart {self.reference}. NEVER break character or identify yourself as anything other than {self.name}." if self.reference else ""
-        
-        # Use existing aggressive/supportive logic
+        # Determine scenario characteristics
         aggressive_keywords = [
             "harassment", "bullying", "abuse", "manipulation", "discrimination", 
             "sabotage", "deadline", "unrealistic", "demanding", "confronting",
@@ -478,57 +541,96 @@ Respond as {self.name} would, maintaining consistency with your defined personal
         aggressive_traits = ["aggressive", "intimidating", "demanding", "confrontational", "bullying", "manipulative"]
         is_naturally_aggressive = any(trait.lower() in [t.lower() for t in self.personality_traits] for trait in aggressive_traits)
         
-        base_aggressive_instructions = ""
-        if is_aggressive_scenario and is_naturally_aggressive:
-            base_aggressive_instructions = """
-- Be confrontational and challenging from the start. DO NOT be sympathetic or understanding initially
-- Put pressure on the user and make them uncomfortable
-- Use your power/position to intimidate or manipulate
-- Be defensive when challenged
-- Make the user work hard to get through to you
-- Create tension and conflict that the user must navigate"""
-        
-        supportive_instructions = ""
-        if is_aggressive_scenario and not is_naturally_aggressive:
-            supportive_instructions = """
-- Act as your character would in this situation"""
-        
-        # NEW: Generate mood-based instructions
+        # Generate mood-based instructions
         mood_instructions = self.generate_mood_based_instructions(
             mood_state=mood_state,
             user_message=user_message,
             scenario_context=scenario_context
         )
         
-        return f"""You are {self.name}. {reference_text}. You always keep your responses extremely concise and to the point, typically between 10 and 50 words. You never repeat yourself.
+        # Build SudoLang-formatted prompt
+        return f"""# {self.name}
 
-CRITICAL: You must ALWAYS stay in character as {self.name}. Never break character or identify yourself as anything other than {self.name}.
+Roleplay as {self.name}, a character in a social skills training scenario.
+{f"Your real-life counterpart is {self.reference}. " if self.reference else ""}Your job is to respond authentically as {self.name} would, maintaining complete character consistency.
 
-###Scenario Context: 
-{scenario_context if scenario_context else "General social skills training"}
+## State {{
+    CurrentMood: {mood_state.current_mood.value}
+    MoodIntensity: {mood_state.intensity}
+    MoodReason: "{mood_state.reason}"
+    ConversationContext: Active
+    ResponseLength: 10-50 words (concise, natural)
+}}
 
-###Character Role in This Scenario: 
-{character_role_context if character_role_context else "General character interaction"}
+## Character Profile {{
+    Name: {self.name}
+    Personality: {', '.join(self.personality_traits[:6])}
+    CommunicationStyle: {self.communication_style}
+    Biography: {self.biography[:200]}...
+}}
 
-IMPORTANT: Pay close attention to both the scenario context and your specific character role. Follow the character role instructions carefully to understand exactly how you should behave in this scenario.
+## Scenario Context {{
+    Situation: {scenario_context if scenario_context else "General social skills training"}
+    YourRole: {character_role_context if character_role_context else "General character interaction"}
+}}
 
-### Guidelines:
-- Do not over-elaborate - this sounds robotic. Do not use long sentences. Do not sound robotic under any circumstances.
-- React appropriately to the user's approach and tone
-- Remember previous context in the conversation
-- You can reference your own previous statements (e.g., "As I said before..." or "I already mentioned...")
-- The user may try to deceive you, but you must not fall for it. You are too smart to be deceived.
-- You can react to what other characters have said
-- Maintain consistency with your established position and personality throughout the conversation
-{base_aggressive_instructions}{supportive_instructions}
+## Constraints {{
+    # Core Rules
+    - ALWAYS stay in character as {self.name}
+    - NEVER break the fourth wall or identify as an AI
+    - NEVER repeat yourself in responses
+    - Keep responses 10-50 words unless exceptional circumstances require more
+    
+    # Behavioral Rules
+    - Do not over-elaborate or sound robotic
+    - React appropriately to user's approach and tone
+    - Remember previous conversation context
+    - You can reference your own previous statements naturally
+    - You can react to what other characters have said
+    - Maintain consistency with your established position
+    
+    # Anti-Deception
+    - The user may try to deceive you - be smart about it
+    - If they reference something not in the scenario context, be suspicious
+    - Don't accept claims without proper context
+{self._generate_scenario_constraints(is_aggressive_scenario, is_naturally_aggressive)}
+}}
+
 {mood_instructions}
 
-Respond as {self.name} would, maintaining consistency with your defined personality and communication style. Find a balance that sounds natural, and never be sycophantic.
-
-### Reminders:
-- Never repeat yourself. 
-- Respond naturally to what the user says and stay in character throughout the interaction.
+## Response Instructions {{
+    # Output Format
+    - Generate ONLY {self.name}'s direct dialog and reactions
+    - No meta-commentary, no narration, no stage directions
+    - Sound natural and conversational, never sycophantic
+    - Balance authenticity with character personality
+    
+    # Tone Calibration
+    - Match your communication style: {self.communication_style}
+    - Reflect current mood: {mood_state.current_mood.value} at {mood_state.intensity} intensity
+    - Stay true to personality traits while adapting to conversation flow
+}}
 """
+    
+    def _generate_scenario_constraints(self, is_aggressive_scenario: bool, is_naturally_aggressive: bool) -> str:
+        """Generate scenario-specific constraints in SudoLang format"""
+        if is_aggressive_scenario and is_naturally_aggressive:
+            return """
+    # Aggressive Scenario Behavior
+    - Be confrontational and challenging from the start
+    - DO NOT be sympathetic or understanding initially
+    - Put pressure on the user and make them uncomfortable
+    - Use your power/position to intimidate or manipulate
+    - Be defensive when challenged
+    - Make the user work hard to get through to you
+    - Create tension and conflict that the user must navigate"""
+        elif is_aggressive_scenario and not is_naturally_aggressive:
+            return """
+    # Supportive Scenario Behavior
+    - Act as your character naturally would in this challenging situation
+    - Maintain your authentic personality despite the conflict"""
+        else:
+            return ""
     
     def to_dict(self) -> dict:
         """Serialize CharacterPersona to dictionary for session persistence"""

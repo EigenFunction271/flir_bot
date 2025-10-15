@@ -45,6 +45,7 @@ class MoodInferenceSystem:
     ) -> MoodState:
         """
         Use LLM to infer the character's new mood based on user's message
+        Uses iterative pipeline: analyze_triggers → check_history → refine_intensity → validate_consistency
         
         Args:
             character: The character whose mood we're inferring
@@ -56,126 +57,59 @@ class MoodInferenceSystem:
         Returns:
             Updated MoodState with new mood, intensity, reason, and trigger keywords
         """
-        # Build mood inference prompt
-        available_moods = [mood.value for mood in CharacterMood]
-        current_mood_info = f"Currently feeling: {current_mood_state.current_mood.value} (intensity: {current_mood_state.intensity})"
-        
-        # Get recent conversation context (last 3-4 exchanges)
-        recent_context = self._format_recent_conversation(conversation_history[-6:])
-        
-        inference_prompt = f"""You are analyzing how {character.name} would emotionally respond to what the user just said.
-
-CHARACTER PROFILE:
-- Name: {character.name}
-- Personality: {', '.join(character.personality_traits[:5])}
-- Communication Style: {character.communication_style}
-- Biography: {character.biography[:300]}...
-- Current Mood: {current_mood_info}
-
-SCENARIO CONTEXT:
-{scenario_context[:400]}...
-
-RECENT CONVERSATION:
-{recent_context}
-
-USER'S LATEST MESSAGE:
-"{user_message}"
-
-Based on {character.name}'s personality and what the user just said, determine:
-1. What MOOD would {character.name} feel right now?
-2. How INTENSE is this emotion (0.0 to 1.0)?
-3. WHY does {character.name} feel this way?
-4. What KEYWORDS in the user's message triggered this mood?
-
-Available moods: {', '.join(available_moods)}
-
-IMPORTANT CHARACTER-SPECIFIC CONSIDERATIONS:
-- If {character.name} has aggressive traits (demanding, intimidating, bullying), they escalate to anger QUICKLY
-- If {character.name} has manipulative traits, they may feel calculating or manipulative when challenged
-- If {character.name} has empathetic traits, they soften when users show vulnerability
-- Consider the TRAJECTORY: Is the user making things better or worse?
-
-RESPOND ONLY WITH VALID JSON in this exact format:
-{{
-    "mood": "one_of_the_available_moods",
-    "intensity": 0.7,
-    "reason": "Brief explanation of why they feel this way based on user's message",
-    "trigger_keywords": ["keyword1", "keyword2"]
-}}
-
-Example 1 (User making excuses to aggressive boss):
-{{
-    "mood": "frustrated",
-    "intensity": 0.8,
-    "reason": "User is making excuses instead of taking responsibility",
-    "trigger_keywords": ["excuse", "can't", "difficult"]
-}}
-
-Example 2 (User presenting solution to skeptical boss):
-{{
-    "mood": "skeptical",
-    "intensity": 0.6,
-    "reason": "User proposed something concrete but I need to verify it's not just talk",
-    "trigger_keywords": ["plan", "proposal"]
-}}
-
-Example 3 (User pushed back effectively):
-{{
-    "mood": "impressed",
-    "intensity": 0.7,
-    "reason": "User stood their ground with data and didn't back down",
-    "trigger_keywords": ["data", "specifically", "timeline"]
-}}
-
-CRITICAL: Consider {character.name}'s personality - aggressive characters get angry faster, empathetic characters soften more easily."""
-
         try:
-            logger.info(f"🎭 MOOD: Inferring mood for {character.name}")
-            logger.info(f"🎭 MOOD: Current state: {current_mood_state.current_mood.value} ({current_mood_state.intensity})")
-            logger.info(f"🎭 MOOD: User message: '{user_message[:100]}...'")
+            logger.info(f"🎭 MOOD PIPELINE: Starting iterative mood inference for {character.name}")
+            logger.info(f"🎭 MOOD PIPELINE: Current state: {current_mood_state.current_mood.value} ({current_mood_state.intensity})")
+            logger.info(f"🎭 MOOD PIPELINE: User message: '{user_message[:100]}...'")
             
-            # Call LLM to infer mood
-            if hasattr(self.llm_client, 'generate_response'):
-                # Using GroqClient
-                response = await self.llm_client.generate_response(
-                    user_message=inference_prompt,
-                    system_prompt="You are a psychological AI that analyzes character emotions. Respond only with valid JSON.",
-                    model_type="fast"
-                )
-            else:
-                # Using GeminiClient
-                logger.info(f"🎭 MOOD: Using Gemini for mood inference")
-                response = await asyncio.to_thread(
-                    self.llm_client.model.generate_content,
-                    inference_prompt
-                )
-                response = response.text
-                logger.info(f"🎭 MOOD: Gemini returned response type: {type(response)}")
+            # Step 1: Analyze triggers
+            triggers_data = await self._analyze_triggers(character, user_message, scenario_context)
+            logger.info(f"📍 STEP 1 (Triggers): Found {len(triggers_data.get('trigger_keywords', []))} triggers")
             
-            logger.info(f"🎭 MOOD: LLM raw response (full): {response}")
+            # Step 2: Check history for mood trajectory
+            trajectory_data = await self._check_mood_history(
+                character, 
+                current_mood_state, 
+                conversation_history, 
+                triggers_data
+            )
+            logger.info(f"📍 STEP 2 (History): Trajectory = {trajectory_data.get('trajectory', 'unknown')}")
             
-            # Parse JSON response
-            mood_data = self._parse_mood_response(response)
+            # Step 3: Refine intensity based on character personality
+            refined_data = await self._refine_intensity(
+                character,
+                trajectory_data,
+                user_message
+            )
+            logger.info(f"📍 STEP 3 (Intensity): Refined to {refined_data.get('intensity', 0.5)}")
+            
+            # Step 4: Validate consistency with character
+            final_data = self._validate_consistency(
+                character,
+                refined_data,
+                current_mood_state
+            )
+            logger.info(f"📍 STEP 4 (Validation): Final mood = {final_data.get('mood', 'neutral')}")
             
             # Create new mood state
-            new_mood = CharacterMood(mood_data["mood"])
-            intensity = float(mood_data["intensity"])
-            reason = mood_data["reason"]
-            triggers = mood_data.get("trigger_keywords", [])
+            new_mood = CharacterMood(final_data["mood"])
+            intensity = float(final_data["intensity"])
+            reason = final_data["reason"]
+            triggers = final_data.get("trigger_keywords", [])
             
             # Update mood state
             current_mood_state.update_mood(new_mood, intensity, reason, triggers)
             
-            logger.info(f"✅ MOOD: {character.name} mood updated: {new_mood.value} (intensity: {intensity})")
-            logger.info(f"✅ MOOD: Reason: {reason}")
-            logger.info(f"✅ MOOD: Triggers: {triggers}")
+            logger.info(f"✅ MOOD PIPELINE: {character.name} mood updated: {new_mood.value} (intensity: {intensity})")
+            logger.info(f"✅ MOOD PIPELINE: Reason: {reason}")
+            logger.info(f"✅ MOOD PIPELINE: Triggers: {triggers}")
             
             return current_mood_state
             
         except Exception as e:
             # Fallback: keep current mood if inference fails
-            logger.error(f"❌ MOOD: Inference failed for {character.name}: {e}")
-            logger.error(f"❌ MOOD: Keeping current mood: {current_mood_state.current_mood.value}")
+            logger.error(f"❌ MOOD PIPELINE: Inference failed for {character.name}: {e}")
+            logger.error(f"❌ MOOD PIPELINE: Keeping current mood: {current_mood_state.current_mood.value}")
             return current_mood_state
     
     def _format_recent_conversation(self, recent_messages: List[Dict]) -> str:
@@ -195,6 +129,234 @@ CRITICAL: Consider {character.name}'s personality - aggressive characters get an
                 formatted.append(f"{character}: {content}")
         
         return "\n".join(formatted[-6:])  # Last 6 messages (3 exchanges)
+    
+    async def _analyze_triggers(
+        self,
+        character: CharacterPersona,
+        user_message: str,
+        scenario_context: str
+    ) -> dict:
+        """
+        STEP 1: Analyze what keywords/behaviors in user's message trigger emotional response
+        
+        Returns dict with: trigger_keywords, initial_mood, preliminary_reason
+        """
+        available_moods = [mood.value for mood in CharacterMood]
+        
+        prompt = f"""# STEP 1: Trigger Analysis
+
+Character: {character.name}
+Personality: {', '.join(character.personality_traits[:5])}
+User Message: "{user_message}"
+
+TASK: Identify what in the user's message would emotionally trigger {character.name}.
+
+Look for:
+- Keywords that match character's sensitivities (excuses, promises, solutions, blame, etc.)
+- Tone indicators (defensive, apologetic, assertive, etc.)
+- Behavioral patterns (deflecting, problem-solving, challenging, etc.)
+
+Available moods: {', '.join(available_moods)}
+
+Respond with JSON:
+{{
+    "trigger_keywords": ["keyword1", "keyword2"],
+    "initial_mood": "likely_mood_from_triggers",
+    "preliminary_reason": "Why these triggers would affect {character.name}"
+}}"""
+
+        response = await self._call_llm(prompt)
+        data = self._parse_mood_response(response)
+        
+        # Ensure we have trigger_keywords even if parsing failed
+        if "trigger_keywords" not in data:
+            data["trigger_keywords"] = []
+        if "initial_mood" not in data:
+            data["initial_mood"] = "neutral"
+        if "preliminary_reason" not in data:
+            data["preliminary_reason"] = "Analyzing user message"
+            
+        return data
+    
+    async def _check_mood_history(
+        self,
+        character: CharacterPersona,
+        current_mood_state: MoodState,
+        conversation_history: List[Dict],
+        triggers_data: dict
+    ) -> dict:
+        """
+        STEP 2: Check mood history to understand trajectory
+        
+        Is the character getting angrier? Softening? Staying consistent?
+        Returns triggers_data + trajectory + adjusted_mood
+        """
+        recent_context = self._format_recent_conversation(conversation_history[-6:])
+        mood_history_str = " → ".join([mood.value for mood in current_mood_state.mood_history[-3:]])
+        
+        prompt = f"""# STEP 2: Mood Trajectory Analysis
+
+Character: {character.name}
+Current Mood: {current_mood_state.current_mood.value} (intensity: {current_mood_state.intensity})
+Mood History: {mood_history_str}
+Recent Conversation:
+{recent_context}
+
+Initial Analysis from Step 1:
+- Triggers: {', '.join(triggers_data.get('trigger_keywords', []))}
+- Suggested Mood: {triggers_data.get('initial_mood', 'neutral')}
+
+TASK: Determine if mood should escalate, de-escalate, or stay consistent.
+
+Consider:
+- If already angry and user makes excuses → escalate further
+- If skeptical but user provides evidence → soften slightly
+- If user changes approach → shift trajectory
+
+Respond with JSON:
+{{
+    "trajectory": "escalating|de-escalating|consistent",
+    "adjusted_mood": "mood_considering_history",
+    "intensity": 0.7,
+    "reason": "Why this trajectory makes sense given history"
+}}"""
+
+        response = await self._call_llm(prompt)
+        data = self._parse_mood_response(response)
+        
+        # Merge with triggers_data
+        result = {**triggers_data, **data}
+        
+        # Ensure required fields
+        if "trajectory" not in result:
+            result["trajectory"] = "consistent"
+        if "adjusted_mood" not in result:
+            result["adjusted_mood"] = triggers_data.get("initial_mood", "neutral")
+            
+        return result
+    
+    async def _refine_intensity(
+        self,
+        character: CharacterPersona,
+        trajectory_data: dict,
+        user_message: str
+    ) -> dict:
+        """
+        STEP 3: Refine intensity based on character personality
+        
+        Aggressive characters → higher intensity
+        Empathetic characters → lower intensity when user shows vulnerability
+        """
+        aggressive_traits = ["aggressive", "intimidating", "demanding", "confrontational", "bullying", "manipulative"]
+        empathetic_traits = ["empathetic", "understanding", "supportive", "caring", "nurturing"]
+        
+        is_aggressive = any(trait.lower() in [t.lower() for t in character.personality_traits] for trait in aggressive_traits)
+        is_empathetic = any(trait.lower() in [t.lower() for t in character.personality_traits] for trait in empathetic_traits)
+        
+        personality_modifier = "aggressive and quick to anger" if is_aggressive else "empathetic and understanding" if is_empathetic else "balanced"
+        
+        prompt = f"""# STEP 3: Intensity Refinement
+
+Character: {character.name}
+Personality: {personality_modifier}
+Mood from Step 2: {trajectory_data.get('adjusted_mood', 'neutral')}
+Current Intensity: {trajectory_data.get('intensity', 0.5)}
+Trajectory: {trajectory_data.get('trajectory', 'consistent')}
+
+User's Message: "{user_message}"
+
+TASK: Refine the emotional intensity (0.0 to 1.0) based on {character.name}'s personality.
+
+Rules:
+- Aggressive characters: Add +0.1 to +0.3 to intensity
+- Empathetic characters: Reduce by -0.1 to -0.2 if user shows vulnerability
+- Escalating trajectory: Add +0.1 to +0.2
+- De-escalating trajectory: Reduce by -0.1 to -0.3
+
+Cap at 1.0 maximum, 0.1 minimum.
+
+Respond with JSON:
+{{
+    "mood": "{trajectory_data.get('adjusted_mood', 'neutral')}",
+    "intensity": 0.7,
+    "reason": "Brief explanation of intensity level"
+}}"""
+
+        response = await self._call_llm(prompt)
+        data = self._parse_mood_response(response)
+        
+        # Merge with trajectory_data
+        result = {**trajectory_data, **data}
+        
+        # Clamp intensity to valid range
+        if "intensity" in result:
+            result["intensity"] = max(0.1, min(1.0, float(result["intensity"])))
+        else:
+            result["intensity"] = 0.5
+            
+        return result
+    
+    def _validate_consistency(
+        self,
+        character: CharacterPersona,
+        refined_data: dict,
+        current_mood_state: MoodState
+    ) -> dict:
+        """
+        STEP 4: Validate that the final mood is consistent with character and scenario
+        
+        This is non-LLM validation - just sanity checks
+        """
+        mood = refined_data.get("mood", "neutral")
+        intensity = refined_data.get("intensity", 0.5)
+        
+        # Sanity check: Don't jump from very negative to very positive in one step
+        negative_moods = ["angry", "hostile", "contemptuous", "frustrated", "dismissive"]
+        positive_moods = ["pleased", "encouraged", "impressed", "respectful"]
+        
+        current_is_negative = current_mood_state.current_mood.value in negative_moods
+        new_is_positive = mood in positive_moods
+        
+        if current_is_negative and new_is_positive and intensity > 0.7:
+            # Unlikely to jump from very negative to very positive
+            logger.warning(f"⚠️ VALIDATION: Suspicious mood jump from {current_mood_state.current_mood.value} to {mood}")
+            # Soften the intensity
+            refined_data["intensity"] = min(intensity, 0.6)
+            logger.info(f"✅ VALIDATION: Reduced intensity to {refined_data['intensity']} for consistency")
+        
+        # Ensure all required fields are present
+        if "mood" not in refined_data:
+            refined_data["mood"] = "neutral"
+        if "intensity" not in refined_data:
+            refined_data["intensity"] = 0.5
+        if "reason" not in refined_data:
+            refined_data["reason"] = "Inferred from conversation"
+        if "trigger_keywords" not in refined_data:
+            refined_data["trigger_keywords"] = []
+            
+        logger.info(f"✅ VALIDATION: Mood data validated and consistent")
+        return refined_data
+    
+    async def _call_llm(self, prompt: str) -> str:
+        """Helper to call LLM with consistent error handling"""
+        system_prompt = "You are a psychological AI analyzing character emotions. Respond ONLY with valid JSON."
+        
+        if hasattr(self.llm_client, 'generate_response'):
+            # Using GroqClient
+            response = await self.llm_client.generate_response(
+                user_message=prompt,
+                system_prompt=system_prompt,
+                model_type="fast"
+            )
+        else:
+            # Using GeminiClient
+            response = await asyncio.to_thread(
+                self.llm_client.model.generate_content,
+                f"{system_prompt}\n\n{prompt}"
+            )
+            response = response.text
+            
+        return response
     
     def _parse_mood_response(self, response: str) -> dict:
         """Parse and validate LLM's mood inference response with robust JSON extraction"""
