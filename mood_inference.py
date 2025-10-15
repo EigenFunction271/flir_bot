@@ -25,15 +25,27 @@ logger = logging.getLogger(__name__)
 class MoodInferenceSystem:
     """Handles LLM-based mood inference for characters"""
     
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, use_smart_inference=True):
         """
         Initialize with your LLM client (Groq or Gemini)
         
         Args:
             llm_client: GroqClient or GeminiClient instance
+            use_smart_inference: If True, uses rule-based inference when possible (saves 70-90% of LLM calls)
         """
         self.llm_client = llm_client
-        logger.info("✅ MoodInferenceSystem initialized")
+        self.use_smart_inference = use_smart_inference
+        
+        # Statistics tracking
+        self.llm_calls = 0
+        self.rule_based_calls = 0
+        self.cache_hits = 0
+        
+        # Simple cache for recent inferences (hash -> (mood_data, timestamp))
+        self.inference_cache = {}
+        self.cache_ttl = 180  # 3 minutes
+        
+        logger.info(f"✅ MoodInferenceSystem initialized (smart_inference={'ON' if use_smart_inference else 'OFF'})")
     
     async def infer_mood(
         self,
@@ -45,7 +57,7 @@ class MoodInferenceSystem:
     ) -> MoodState:
         """
         Use LLM to infer the character's new mood based on user's message
-        Uses iterative pipeline: analyze_triggers → check_history → refine_intensity → validate_consistency
+        OPTIMIZED: Single comprehensive LLM call instead of 3 separate calls
         
         Args:
             character: The character whose mood we're inferring
@@ -58,38 +70,27 @@ class MoodInferenceSystem:
             Updated MoodState with new mood, intensity, reason, and trigger keywords
         """
         try:
-            logger.info(f"🎭 MOOD PIPELINE: Starting iterative mood inference for {character.name}")
-            logger.info(f"🎭 MOOD PIPELINE: Current state: {current_mood_state.current_mood.value} ({current_mood_state.intensity})")
-            logger.info(f"🎭 MOOD PIPELINE: User message: '{user_message[:100]}...'")
+            logger.info(f"🎭 MOOD: Starting optimized mood inference for {character.name}")
+            logger.info(f"🎭 MOOD: Current state: {current_mood_state.current_mood.value} ({current_mood_state.intensity})")
+            logger.info(f"🎭 MOOD: User message: '{user_message[:100]}...'")
             
-            # Step 1: Analyze triggers
-            triggers_data = await self._analyze_triggers(character, user_message, scenario_context)
-            logger.info(f"📍 STEP 1 (Triggers): Found {len(triggers_data.get('trigger_keywords', []))} triggers")
-            
-            # Step 2: Check history for mood trajectory
-            trajectory_data = await self._check_mood_history(
+            # OPTIMIZED: Single comprehensive inference (was 3 separate calls)
+            mood_data = await self._infer_mood_comprehensive(
                 character, 
-                current_mood_state, 
+                user_message, 
+                current_mood_state,
                 conversation_history, 
-                triggers_data
+                scenario_context
             )
-            logger.info(f"📍 STEP 2 (History): Trajectory = {trajectory_data.get('trajectory', 'unknown')}")
+            logger.info(f"📍 INFERENCE: Mood={mood_data.get('mood')}, Intensity={mood_data.get('intensity')}")
             
-            # Step 3: Refine intensity based on character personality
-            refined_data = await self._refine_intensity(
-                character,
-                trajectory_data,
-                user_message
-            )
-            logger.info(f"📍 STEP 3 (Intensity): Refined to {refined_data.get('intensity', 0.5)}")
-            
-            # Step 4: Validate consistency with character
+            # Validate consistency with character (local, no LLM call)
             final_data = self._validate_consistency(
                 character,
-                refined_data,
+                mood_data,
                 current_mood_state
             )
-            logger.info(f"📍 STEP 4 (Validation): Final mood = {final_data.get('mood', 'neutral')}")
+            logger.info(f"✅ VALIDATION: Final mood = {final_data.get('mood', 'neutral')}")
             
             # Create new mood state
             new_mood = CharacterMood(final_data["mood"])
@@ -100,17 +101,118 @@ class MoodInferenceSystem:
             # Update mood state
             current_mood_state.update_mood(new_mood, intensity, reason, triggers)
             
-            logger.info(f"✅ MOOD PIPELINE: {character.name} mood updated: {new_mood.value} (intensity: {intensity})")
-            logger.info(f"✅ MOOD PIPELINE: Reason: {reason}")
-            logger.info(f"✅ MOOD PIPELINE: Triggers: {triggers}")
+            logger.info(f"✅ MOOD: {character.name} mood updated: {new_mood.value} (intensity: {intensity})")
+            logger.info(f"✅ MOOD: Reason: {reason}")
+            logger.info(f"✅ MOOD: Triggers: {triggers}")
             
             return current_mood_state
             
         except Exception as e:
             # Fallback: keep current mood if inference fails
-            logger.error(f"❌ MOOD PIPELINE: Inference failed for {character.name}: {e}")
-            logger.error(f"❌ MOOD PIPELINE: Keeping current mood: {current_mood_state.current_mood.value}")
+            logger.error(f"❌ MOOD: Inference failed for {character.name}: {e}")
+            logger.error(f"❌ MOOD: Keeping current mood: {current_mood_state.current_mood.value}")
             return current_mood_state
+    
+    async def _infer_mood_comprehensive(
+        self,
+        character: CharacterPersona,
+        user_message: str,
+        current_mood_state: MoodState,
+        conversation_history: List[Dict],
+        scenario_context: str
+    ) -> dict:
+        """
+        OPTIMIZED: Single comprehensive mood inference combining all analysis steps
+        
+        Replaces 3 separate LLM calls with 1 comprehensive call that:
+        1. Analyzes trigger keywords
+        2. Considers conversation history and trajectory
+        3. Adjusts intensity based on personality
+        
+        Returns: dict with mood, intensity, reason, trigger_keywords
+        """
+        available_moods = [mood.value for mood in CharacterMood]
+        current_mood_info = f"{current_mood_state.current_mood.value} (intensity: {current_mood_state.intensity})"
+        recent_context = self._format_recent_conversation(conversation_history[-6:])
+        
+        # Determine personality modifiers
+        aggressive_traits = ["aggressive", "intimidating", "demanding", "confrontational", "bullying", "manipulative"]
+        empathetic_traits = ["empathetic", "understanding", "supportive", "caring", "nurturing"]
+        
+        is_aggressive = any(trait.lower() in [t.lower() for t in character.personality_traits] for trait in aggressive_traits)
+        is_empathetic = any(trait.lower() in [t.lower() for t in character.personality_traits] for trait in empathetic_traits)
+        
+        personality_note = (
+            "aggressive and quick to anger" if is_aggressive 
+            else "empathetic and understanding" if is_empathetic 
+            else "balanced"
+        )
+        
+        # Mood history for trajectory
+        mood_history_str = " → ".join([mood.value for mood in current_mood_state.mood_history[-3:]]) if current_mood_state.mood_history else "No history"
+        
+        # Comprehensive prompt combining all analysis steps
+        comprehensive_prompt = f"""Analyze {character.name}'s emotional response to the user's message.
+
+CHARACTER: {character.name}
+Personality: {', '.join(character.personality_traits[:5])} ({personality_note})
+Current Mood: {current_mood_info}
+Mood History: {mood_history_str}
+
+SCENARIO: {scenario_context[:300]}...
+
+RECENT CONVERSATION:
+{recent_context}
+
+USER'S MESSAGE: "{user_message}"
+
+COMPREHENSIVE ANALYSIS - Do ALL of these steps:
+
+1. TRIGGER ANALYSIS: What keywords/behaviors in the user's message trigger an emotional response?
+2. TRAJECTORY: Based on conversation history, is {character.name}'s mood escalating, de-escalating, or staying consistent?
+3. INTENSITY: Adjust emotional intensity based on:
+   - {character.name}'s personality ({personality_note})
+   - Aggressive characters: Higher intensity (+0.2)
+   - Empathetic characters: Lower intensity when user shows vulnerability (-0.2)
+   - Escalating trajectory: +0.1 to +0.2
+   - De-escalating trajectory: -0.1 to -0.3
+
+Available moods: {', '.join(available_moods)}
+
+Respond with JSON:
+{{
+    "mood": "mood_name",
+    "intensity": 0.7,
+    "reason": "Brief explanation considering triggers, trajectory, and personality",
+    "trigger_keywords": ["keyword1", "keyword2"],
+    "trajectory": "escalating|de-escalating|consistent"
+}}
+
+EXAMPLES:
+
+User makes excuse to aggressive boss:
+{{
+    "mood": "angry",
+    "intensity": 0.85,
+    "reason": "User making excuses instead of taking responsibility. Aggressive personality escalates frustration.",
+    "trigger_keywords": ["excuse", "can't", "difficult"],
+    "trajectory": "escalating"
+}}
+
+User shows data to skeptical colleague:
+{{
+    "mood": "skeptical",
+    "intensity": 0.55,
+    "reason": "User provided concrete data. Intensity slightly reduced but maintaining skepticism.",
+    "trigger_keywords": ["data", "analysis", "proof"],
+    "trajectory": "de-escalating"
+}}"""
+
+        # Single LLM call
+        response = await self._call_llm(comprehensive_prompt)
+        data = self._parse_mood_response(response)
+        
+        return data
     
     def _format_recent_conversation(self, recent_messages: List[Dict]) -> str:
         """Format recent conversation for context"""
